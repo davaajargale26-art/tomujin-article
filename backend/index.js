@@ -34,6 +34,7 @@ loadEnvFile(path.join(__dirname, ".env"));
 const app = express();
 const PORT = Number(process.env.PORT) || 8890;
 const publicPath = path.join(__dirname, "..", "frontend", "public");
+const adminPassword = process.env.ADMIN_PASSWORD || "";
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -61,6 +62,11 @@ let usingMemoryStore = false;
 let memoryCategories = [];
 let memoryArticles = [];
 let nextMemoryArticleId = 1;
+
+function hasAdminAccess(req) {
+  if (!adminPassword) return true;
+  return req.get("x-admin-password") === adminPassword;
+}
 
 const seedCategories = [
   ["guides", "Зөвлөгөө"],
@@ -252,6 +258,12 @@ function createMemoryArticle(payload) {
   nextMemoryArticleId += 1;
   memoryArticles.unshift(article);
   return mapMemoryArticle(article);
+}
+
+function deleteMemoryArticle(slug) {
+  const originalLength = memoryArticles.length;
+  memoryArticles = memoryArticles.filter((article) => article.slug !== slug);
+  return memoryArticles.length !== originalLength;
 }
 
 function categoryPlaceholders() {
@@ -561,6 +573,33 @@ app.post("/api/articles", async (req, res) => {
     res.status(201).json(mapArticle(rows[0]));
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message || "Could not save article." });
+  }
+});
+
+app.delete("/api/articles/:slug", async (req, res) => {
+  if (!hasAdminAccess(req)) {
+    return res.status(401).json({ message: "Admin password required." });
+  }
+
+  if (usingMemoryStore) {
+    if (!deleteMemoryArticle(req.params.slug)) {
+      return res.status(404).json({ message: "Article not found." });
+    }
+
+    res.json({ ok: true });
+    return;
+  }
+
+  try {
+    const [result] = await db.query("DELETE FROM news_articles WHERE slug = ?", [req.params.slug]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Article not found." });
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: "Could not delete article.", error: error.message });
   }
 });
 

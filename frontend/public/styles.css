@@ -154,6 +154,7 @@ button:disabled {
 .hero-overlay a:focus-visible,
 .form-actions button:focus-visible,
 .back-link:focus-visible,
+.delete-link:focus-visible,
 #backTop:focus-visible {
   outline: 3px solid rgba(180, 35, 53, 0.28);
   outline-offset: 3px;
@@ -199,6 +200,7 @@ button:disabled {
 .hero-overlay a,
 .form-actions button,
 .back-link,
+.delete-link,
 #backTop {
   transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
@@ -527,6 +529,13 @@ button:disabled {
   padding: 48px 0 84px;
 }
 
+.article-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .back-link {
   min-height: 42px;
   border: 1px solid var(--line);
@@ -538,6 +547,20 @@ button:disabled {
 
 .back-link:hover {
   background: var(--forest);
+  color: var(--paper);
+}
+
+.delete-link {
+  min-height: 42px;
+  border: 1px solid rgba(180, 35, 53, 0.24);
+  padding: 0 16px;
+  background: rgba(180, 35, 53, 0.08);
+  color: var(--brand);
+  font-weight: 900;
+}
+
+.delete-link:hover {
+  background: var(--brand);
   color: var(--paper);
 }
 

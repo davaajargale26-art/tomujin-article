@@ -224,7 +224,10 @@ async function openArticle(slug, { pushUrl = false } = {}) {
 
     app.innerHTML = `
       <section class="article-detail">
-        <button class="back-link" type="button" id="backToNews">Буцах</button>
+        <div class="article-actions">
+          <button class="back-link" type="button" id="backToNews">Буцах</button>
+          <button class="delete-link" type="button" id="deleteArticle">Устгах</button>
+        </div>
         <div class="detail-layout">
           <div class="detail-image">
             <img src="${escapeHtml(article.imageUrl || "/images/stagknight.jpg")}" alt="${escapeHtml(article.title)}" />
@@ -250,9 +253,47 @@ async function openArticle(slug, { pushUrl = false } = {}) {
       loadArticles({ scrollNews: true });
     });
 
+    document.querySelector("#deleteArticle").addEventListener("click", () => {
+      deleteArticle(article.slug, article.title);
+    });
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (error) {
     setStatus(error.message || "Нийтлэл нээж чадсангүй.");
+  }
+}
+
+async function deleteArticle(slug, title, adminPassword = "", { askConfirm = true } = {}) {
+  if (askConfirm) {
+    const confirmed = window.confirm(`"${title}" нийтлэлийг устгах уу?`);
+    if (!confirmed) return;
+  }
+
+  const headers = adminPassword ? { "x-admin-password": adminPassword } : {};
+
+  try {
+    await fetchJson(`/api/articles/${slug}`, {
+      method: "DELETE",
+      headers,
+    });
+
+    state.activeCategory = "all";
+    state.query = "";
+    headerSearchInput.value = "";
+    history.pushState({ view: "home" }, "", "/");
+    mountHome();
+    await loadCategories();
+    await loadArticles({ scrollNews: true });
+  } catch (error) {
+    if (error.message === "Admin password required.") {
+      const password = window.prompt("Устгах админ код оруулна уу");
+      if (password) {
+        await deleteArticle(slug, title, password, { askConfirm: false });
+      }
+      return;
+    }
+
+    window.alert(error.message || "Нийтлэлийг устгаж чадсангүй.");
   }
 }
 
