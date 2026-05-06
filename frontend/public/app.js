@@ -69,6 +69,15 @@ function setStatus(message = "") {
   }
 }
 
+function articleUrl(slug) {
+  return `/article/${encodeURIComponent(slug)}`;
+}
+
+function getArticleSlugFromPath() {
+  const match = window.location.pathname.match(/^\/article\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 function mountHome() {
   state.view = "home";
   app.innerHTML = homeTemplate.innerHTML;
@@ -107,6 +116,9 @@ function renderCategories() {
       state.query = "";
       headerSearchInput.value = "";
       renderCategories();
+      if (getArticleSlugFromPath()) {
+        history.pushState({ view: "home" }, "", "/");
+      }
       loadArticles({ scrollNews: true });
     });
   });
@@ -140,7 +152,7 @@ async function loadArticles({ openSingle = false, scrollNews = false } = {}) {
     setStatus(state.articles.length ? "" : "Нийтлэл олдсонгүй.");
 
     if (openSingle && state.articles.length === 1) {
-      openArticle(state.articles[0].slug);
+      openArticle(state.articles[0].slug, { pushUrl: true });
       return;
     }
 
@@ -166,7 +178,7 @@ function renderArticles() {
   articleGrid.innerHTML = state.articles
     .map(
       (article) => `
-        <article class="post-card" tabindex="0" data-slug="${escapeHtml(article.slug)}">
+        <a class="post-card" href="${articleUrl(article.slug)}" data-slug="${escapeHtml(article.slug)}" aria-label="${escapeHtml(article.title)} унших">
           <img src="${escapeHtml(article.imageUrl || "/images/stagknight.jpg")}" alt="${escapeHtml(article.title)}" />
           <div class="post-copy">
             <div class="post-meta">
@@ -178,7 +190,7 @@ function renderArticles() {
             <small>${escapeHtml(article.author)}</small>
             <strong>Унших</strong>
           </div>
-        </article>
+        </a>
       `
     )
     .join("");
@@ -190,20 +202,25 @@ function renderArticles() {
   });
 
   articleGrid.querySelectorAll("[data-slug]").forEach((card) => {
-    card.addEventListener("click", () => openArticle(card.dataset.slug));
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        openArticle(card.dataset.slug);
+    card.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+        return;
       }
+
+      event.preventDefault();
+      openArticle(card.dataset.slug, { pushUrl: true });
     });
   });
 }
 
-async function openArticle(slug) {
+async function openArticle(slug, { pushUrl = false } = {}) {
   try {
     const article = await fetchJson(`/api/articles/${slug}`);
     state.view = "article";
+
+    if (pushUrl && window.location.pathname !== articleUrl(slug)) {
+      history.pushState({ view: "article", slug }, "", articleUrl(slug));
+    }
 
     app.innerHTML = `
       <section class="article-detail">
@@ -227,7 +244,9 @@ async function openArticle(slug) {
     });
 
     document.querySelector("#backToNews").addEventListener("click", () => {
+      history.pushState({ view: "home" }, "", "/");
       mountHome();
+      renderCategories();
       loadArticles({ scrollNews: true });
     });
 
@@ -263,7 +282,7 @@ function bindArticleForm() {
       headerSearchInput.value = "";
       await loadCategories();
       await loadArticles();
-      openArticle(article.slug);
+      openArticle(article.slug, { pushUrl: true });
     } catch (error) {
       formStatus.textContent = error.message || "Нийтлэлийг хадгалж чадсангүй.";
     } finally {
@@ -293,7 +312,33 @@ window.addEventListener("scroll", () => {
   backTop.classList.toggle("is-visible", window.scrollY > 460);
 });
 
-mountHome();
-Promise.all([loadCategories(), loadArticles()]).catch((error) => {
+window.addEventListener("popstate", () => {
+  const slug = getArticleSlugFromPath();
+
+  if (slug) {
+    openArticle(slug, { pushUrl: false });
+    return;
+  }
+
+  mountHome();
+  renderCategories();
+  loadArticles();
+});
+
+async function startApp() {
+  mountHome();
+  await loadCategories();
+
+  const slug = getArticleSlugFromPath();
+  if (slug) {
+    await openArticle(slug, { pushUrl: false });
+    return;
+  }
+
+  await loadArticles();
+}
+
+startApp().catch((error) => {
+  mountHome();
   setStatus(error.message || "Сайтыг ачаалж чадсангүй.");
 });

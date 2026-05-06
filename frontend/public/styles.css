@@ -103,9 +103,24 @@ button:disabled {
   font-weight: 800;
 }
 
+.category-area {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.category-area > span {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .main-nav {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   flex-wrap: nowrap;
   gap: 8px;
@@ -341,6 +356,7 @@ button:disabled {
   background: var(--paper);
   box-shadow: 0 1px 0 rgba(16, 24, 32, 0.04);
   cursor: pointer;
+  color: var(--ink);
 }
 
 .post-card:focus-visible {
@@ -626,8 +642,13 @@ button:disabled {
   }
 
   .brand,
+  .category-area,
   .header-actions {
     justify-self: stretch;
+  }
+
+  .category-area {
+    grid-template-columns: 1fr;
   }
 
   .main-nav {
