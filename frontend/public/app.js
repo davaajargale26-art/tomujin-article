@@ -149,7 +149,7 @@ function mountHome() {
 
 function renderCategories() {
   const buttons = [
-    `<button class="${state.activeCategory === "all" ? "is-active" : ""}" data-category="all" type="button" title="Бүх нийтлэлийг харах">Бүгд</button>`,
+    `<button class="${state.activeCategory === "all" ? "is-active" : ""}" data-category="all" type="button" title="Бүх нийтлэлийг харах">Buhu</button>`,
     ...state.categories.map((category) => {
       const count = Number(category.articleCount || 0);
 

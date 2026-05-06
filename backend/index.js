@@ -68,10 +68,10 @@ function hasAdminAccess(req) {
 }
 
 const seedCategories = [
-  ["guides", "Зөвлөгөө"],
-  ["culture", "Соёл"],
-  ["games", "Тоглоом"],
-  ["updates", "Шинэ мэдээ"],
+  ["guides", "Hawt"],
+  ["culture", "Tsa"],
+  ["games", "Yang"],
+  ["updates", "Buhu"],
 ];
 
 const visibleCategorySlugs = seedCategories.map(([slug]) => slug);
