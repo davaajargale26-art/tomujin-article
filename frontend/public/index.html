@@ -4,110 +4,431 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Tomujin Article нийтлэлийн сайт" />
-    <title>Tomujin Article</title>
+    <title>Tom/Art</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800;900&family=Noto+Serif+Display:wght@600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@500;600;700;800;900&family=Noto+Sans:wght@400;500;600;700;800;900&family=Noto+Serif:wght@400;500;600;700&family=Noto+Serif+Display:wght@600;700;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
   <body>
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="instagramGradient" x1="7" y1="41" x2="41" y2="7" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#feda75" />
+          <stop offset="0.25" stop-color="#fa7e1e" />
+          <stop offset="0.5" stop-color="#d62976" />
+          <stop offset="0.75" stop-color="#962fbf" />
+          <stop offset="1" stop-color="#4f5bd5" />
+        </linearGradient>
+
+        <symbol id="icon-facebook" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="23" fill="#1877F2" />
+          <path fill="#ffffff" d="M30.6 26.1l.7-5.2h-5v-3.3c0-1.5.7-2.8 2.9-2.8h2.3v-4.4c-.4-.1-2-.4-3.9-.4-4 0-6.7 2.5-6.7 7v3.9h-4.5v5.2h4.5v12.6h5.4V26.1h4.3z" />
+        </symbol>
+
+        <symbol id="icon-instagram" viewBox="0 0 48 48">
+          <rect x="4" y="4" width="40" height="40" rx="12" fill="url(#instagramGradient)" />
+          <path fill="none" stroke="#ffffff" stroke-width="4" d="M17 14h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H17a3 3 0 0 1-3-3V17a3 3 0 0 1 3-3z" />
+          <circle cx="24" cy="24" r="6.5" fill="none" stroke="#ffffff" stroke-width="4" />
+          <circle cx="32" cy="16" r="2.2" fill="#ffffff" />
+        </symbol>
+
+        <symbol id="icon-gmail" viewBox="0 0 48 48">
+          <path fill="#4285F4" d="M34 42h7c2.2 0 4-1.8 4-4V16.3l-11 8.2V42z" />
+          <path fill="#34A853" d="M3 16.3V38c0 2.2 1.8 4 4 4h7V24.5L3 16.3z" />
+          <path fill="#FBBC04" d="M34 14.5v10L45 16.3V12c0-3.1-3.6-4.9-6.1-3L34 14.5z" />
+          <path fill="#EA4335" d="M14 24.5v-10l10 7.5l10-7.5v10L24 32L14 24.5z" />
+          <path fill="#C5221F" d="M3 12v4.3l11 8.2v-10L9.1 9C6.6 7.1 3 8.9 3 12z" />
+        </symbol>
+
+        <symbol id="icon-phone" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="22" fill="#128C3B" />
+          <path fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.3" d="M17.2 12.8l4.2 7.2l-3.2 3.1c2.2 4.4 5.5 7.7 9.9 9.9l3.1-3.2l7.2 4.2c.8.5 1.1 1.4.8 2.2c-.8 2.1-2.5 3.8-4.7 4.5c-1.9.6-8.1-1-14.2-7.1s-7.7-12.3-7.1-14.2c.7-2.2 2.4-3.9 4.5-4.7c.8-.3 1.7 0 2.2.8z" />
+        </symbol>
+      </defs>
+    </svg>
+
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/" aria-label="Tomujin Article home">
-          <span class="brand-mark">T</span>
-          <span class="brand-word">
-            <strong>TOMUJIN</strong>
-            <small>ARTICLE</small>
+          <span class="brand-logo" aria-hidden="true">
+            <span>TOM</span><span class="brand-slash">/</span><span>ART</span>
           </span>
         </a>
 
         <div class="category-area">
-          <span>Houses</span>
           <nav class="main-nav" id="categoryNav" aria-label="Article categories"></nav>
         </div>
 
-        <div class="header-actions">
-          <form class="header-search" id="headerSearchForm">
-            <input id="headerSearchInput" type="search" placeholder="Нийтлэл хайх" />
-            <button type="submit" aria-label="Хайх">Search</button>
-          </form>
-          <button class="admin-button" id="adminLogin" type="button">Админ</button>
-          <a class="submit-button" id="showAddArticle" href="#addArticle">Нийтлэл нэмэх</a>
-        </div>
       </div>
     </header>
+
+    <div class="header-actions" aria-label="Site tools">
+      <form class="header-search" id="headerSearchForm">
+        <input id="headerSearchInput" type="search" placeholder="Нийтлэл хайх" />
+        <button type="submit" aria-label="Хайх">Search</button>
+      </form>
+    </div>
+    <button class="theme-toggle side-theme-toggle" type="button" id="themeToggle" aria-label="Өнгө солих">Цагаан</button>
 
     <main id="app"></main>
 
     <template id="homeTemplate">
-      <section class="hero">
-        <img class="hero-image" src="/images/stagknight.jpg" alt="" />
-        <div class="hero-overlay">
-          <span class="eyebrow">Tomujin / Editorial</span>
-          <h1>TOMUJIN ARTICLE</h1>
-          <p>Сурагчдын бичсэн нийтлэл, бодол, тэмдэглэлийг нэг дор цэгцтэй унших орчин.</p>
-          <a href="#news">Нийтлэлүүд</a>
+      <div class="substack-home-shell">
+        <div class="substack-feed">
+      <section class="hero" id="heroCarousel">
+        <div class="hero-titlebar">
+          <span>Онцлох</span>
+          <small>Featured stories</small>
         </div>
+        <div class="hero-track" id="heroTrack">
+          <a class="hero-slide is-active" href="#news">
+            <img class="hero-image" src="/images/stagknight.jpg" alt="" />
+            <div class="hero-overlay">
+              <span class="eyebrow">Tomujin / Editorial</span>
+              <h1>TOMUJIN ARTICLE</h1>
+              <p>Сурагчдын бичсэн нийтлэл, бодол, тэмдэглэлийг нэг дор цэгцтэй унших орчин.</p>
+              <strong>Нийтлэлүүд</strong>
+            </div>
+          </a>
+        </div>
+        <button class="hero-arrow hero-arrow-left" type="button" id="heroPrev" aria-label="Өмнөх онцлох нийтлэл">‹</button>
+        <button class="hero-arrow hero-arrow-right" type="button" id="heroNext" aria-label="Дараах онцлох нийтлэл">›</button>
+        <div class="hero-dots" id="heroDots"></div>
       </section>
 
       <section class="section" id="news">
         <div class="section-heading">
-          <span>Latest</span>
-          <h2>Сүүлийн нийтлэлүүд</h2>
+          <span>Writings</span>
+          <h2>Alumni writing archive</h2>
         </div>
 
+        <div class="archive-filters" id="archiveFilters"></div>
         <p class="status" id="status"></p>
         <div class="post-grid" id="articleGrid"></div>
+        <nav class="post-pagination" id="articlePagination" aria-label="Article pages"></nav>
       </section>
 
-      <section class="publish-band" id="addArticle">
-        <div class="publish-inner">
-          <div class="section-heading align-left">
-            <span>Publish</span>
-            <h2>Шинэ нийтлэл</h2>
+        </div>
+
+        <aside class="substack-right-rail" aria-label="Homepage sidebar">
+          <section class="rail-card rail-intro-card">
+            <span class="rail-logo">TOM/ART</span>
+            <h2>Бидний тухай</h2>
+            <p>Энэ сайт нь Tomujin Alternative School-ийн сурагчдын бичсэн бичвэр, нийтлэл, бодол, тэмдэглэлийг олон нийтэд хүргэх зорилготой.</p>
+            <div class="rail-contact-icons" aria-label="Contact links">
+              <a href="#aboutContact" aria-label="Facebook contact">
+                <svg class="contact-icon" aria-hidden="true"><use href="#icon-facebook"></use></svg>
+              </a>
+              <a href="#aboutContact" aria-label="Instagram contact">
+                <svg class="contact-icon" aria-hidden="true"><use href="#icon-instagram"></use></svg>
+              </a>
+              <a href="#aboutContact" aria-label="Phone contact">
+                <svg class="contact-icon contact-icon-phone" aria-hidden="true"><use href="#icon-phone"></use></svg>
+              </a>
+              <a href="#aboutContact" aria-label="Gmail contact">
+                <svg class="contact-icon" aria-hidden="true"><use href="#icon-gmail"></use></svg>
+              </a>
+            </div>
+          </section>
+
+          <section class="rail-card rail-posts-card">
+            <div class="rail-heading">
+              <strong>Бичвэрүүд</strong>
+            </div>
+            <div class="rail-article-list" id="railArticleList"></div>
+          </section>
+        </aside>
+      </div>
+    </template>
+
+    <template id="adminTemplate">
+      <section class="admin-dashboard">
+        <div class="admin-shell">
+          <div class="admin-topbar">
+            <div class="section-heading align-left">
+              <span>Admin</span>
+              <h2>Dashboard</h2>
+            </div>
+            <div class="admin-identity" id="adminIdentity"></div>
+            <div class="admin-toolbar">
+              <button class="back-link" type="button" id="adminBackHome">Нүүр хуудас</button>
+              <button class="delete-link" type="button" id="adminLogoutButton">Logout</button>
+            </div>
           </div>
 
-          <form class="article-form" id="articleForm">
-            <label>
-              Гарчиг
-              <input name="title" type="text" placeholder="Нийтлэлийн гарчиг" required />
+          <div class="admin-layout">
+            <form class="article-form admin-editor" id="adminArticleForm">
+              <input type="hidden" name="originalSlug" id="adminOriginalSlug" />
+              <div class="admin-editor-title wide">
+                <strong>Article Editor</strong>
+                <span>Create a new story or edit the selected article.</span>
+              </div>
+              <label>
+                Title
+                <input name="title" type="text" placeholder="Write the article headline" required />
+              </label>
+              <label>
+                Slug
+                <input name="slug" type="text" placeholder="readable-article-url" required />
+              </label>
+              <label>
+                Author
+                <input name="author" type="text" placeholder="Author name" required />
+              </label>
+              <label>
+                Content Type
+                <select name="contentType" required></select>
+              </label>
+              <fieldset class="choice-field wide">
+                <legend>Category</legend>
+                <div class="choice-grid" id="adminArticleCategories"></div>
+              </fieldset>
+              <fieldset class="choice-field wide">
+                <legend>Graduate Year</legend>
+                <div class="choice-grid compact" id="adminArticleYears"></div>
+              </fieldset>
+              <label class="wide">
+                Tags
+                <input name="tags" type="text" placeholder="education, career, essay" required />
+              </label>
+              <label>
+                Cover Image URL
+                <input name="imageUrl" type="text" placeholder="https://example.com/photo.jpg or /images/uploads/photo.webp" />
+              </label>
+              <label class="admin-upload-field">
+                Upload image
+                <input id="adminImageFile" type="file" accept="image/avif,image/gif,image/jpeg,image/png,image/webp" />
+                <span class="image-upload-status" id="adminImageStatus"></span>
+              </label>
+              <div class="admin-image-preview" id="adminImagePreview">
+                <span>Image preview</span>
+                <img src="/images/stagknight.jpg" alt="" />
+              </div>
+              <label class="feature-toggle">
+                <input name="featured" type="checkbox" />
+                <span>Featured</span>
+              </label>
+              <label>
+                Featured order
+                <input name="featuredOrder" type="number" min="1" max="99" placeholder="1 to 4" />
+              </label>
+              <label>
+                Publish Date
+                <input name="publishedAt" type="datetime-local" required />
+              </label>
+              <label>
+                Status
+                <select name="status" required>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
+                </select>
+              </label>
+              <label class="wide">
+                Excerpt
+                <textarea name="excerpt" rows="3" placeholder="A short summary for cards and previews"></textarea>
+              </label>
+              <label>
+                Meta title
+                <input name="metaTitle" type="text" maxlength="220" placeholder="Optional SEO title" />
+              </label>
+              <label>
+                Meta description
+                <textarea name="metaDescription" rows="3" maxlength="320" placeholder="Optional SEO description"></textarea>
+              </label>
+              <label class="wide">
+                Body/content
+                <textarea name="body" rows="10" placeholder="Write the full article body here"></textarea>
+              </label>
+              <div class="admin-editor-title wide compact-title">
+                <strong>Alumni Profile</strong>
+                <span>Shown on the author's archive page.</span>
+              </div>
+              <label class="wide">
+                Bio
+                <textarea name="authorBio" rows="3" placeholder="Short alumni bio"></textarea>
+              </label>
+              <label>
+                University
+                <input name="authorUniversity" type="text" placeholder="University name" />
+              </label>
+              <label>
+                Major
+                <input name="authorMajor" type="text" placeholder="Major or program" />
+              </label>
+              <label>
+                Current Work
+                <input name="authorCurrentWork" type="text" placeholder="Current role or work" />
+              </label>
+              <label class="wide">
+                Social Links
+                <textarea name="authorSocialLinks" rows="2" placeholder="One link per line"></textarea>
+              </label>
+              <div class="admin-audit wide">
+                <div class="admin-list-heading">
+                  <strong>Audit history</strong>
+                </div>
+                <div class="admin-audit-list" id="adminAuditList">Select an article to view history.</div>
+              </div>
+              <div class="form-actions">
+                <p id="adminFormStatus"></p>
+                <div class="admin-form-buttons">
+                  <button class="auth-secondary" type="button" id="newArticleButton">Цэвэрлэх</button>
+                  <button type="submit" data-save-status="draft" id="adminSaveDraft">Save Draft</button>
+                  <button type="submit" data-save-status="published" id="adminPublishArticle">Publish</button>
+                  <button class="auth-secondary" type="button" id="adminArchiveArticle">Archive</button>
+                  <button class="auth-secondary" type="button" id="adminRestoreArticle">Restore</button>
+                </div>
+              </div>
+            </form>
+
+            <div class="admin-side">
+              <div class="admin-list-panel admin-preview-panel">
+                <div class="admin-list-heading">
+                  <strong>Preview</strong>
+                </div>
+                <div class="admin-hero-preview" id="adminHeroPreview"></div>
+              </div>
+
+              <div class="admin-list-panel admin-featured-panel">
+                <div class="admin-list-heading">
+                  <strong>Featured carousel</strong>
+                  <span class="featured-count" id="adminFeaturedCount">0 / 4</span>
+                </div>
+                <p class="status" id="adminFeaturedStatus"></p>
+                <div class="admin-featured-list" id="adminFeaturedList"></div>
+              </div>
+
+              <div class="admin-list-panel admin-category-panel" id="adminCategoryPanel">
+                <div class="admin-list-heading">
+                  <strong>Categories</strong>
+                </div>
+                <form class="admin-category-form" id="adminCategoryForm">
+                  <input type="hidden" name="originalSlug" />
+                  <input name="name" type="text" placeholder="Category name" required />
+                  <input name="slug" type="text" placeholder="category-slug" />
+                  <button type="submit">Save Category</button>
+                </form>
+                <p class="status" id="adminCategoryStatus"></p>
+                <div class="admin-category-list" id="adminCategoryList"></div>
+              </div>
+
+              <div class="admin-list-panel admin-owner-panel is-hidden" id="adminOwnerPanel">
+                <div class="admin-list-heading">
+                  <strong>Manage Admins</strong>
+                </div>
+                <form class="admin-admin-form" id="adminAdminForm">
+                  <input name="name" type="text" placeholder="Name" required />
+                  <input name="email" type="email" placeholder="Email" required />
+                  <input name="password" type="password" placeholder="Password" required />
+                  <select name="role" required>
+                    <option value="writer">writer</option>
+                    <option value="editor">editor</option>
+                    <option value="owner">owner</option>
+                  </select>
+                  <button type="submit">Add Admin</button>
+                </form>
+                <p class="status" id="adminAdminStatus"></p>
+                <div class="admin-admin-list" id="adminAdminList"></div>
+              </div>
+
+              <div class="admin-list-panel">
+                <div class="admin-list-heading">
+                  <strong>Articles</strong>
+                  <button class="back-link" type="button" id="refreshAdminArticles">Refresh</button>
+                </div>
+                <div class="admin-list-search">
+                  <label for="adminArticleSearch">Find post</label>
+                  <input id="adminArticleSearch" type="search" autocomplete="off" placeholder="Search by title" />
+                </div>
+                <div class="admin-status-filter" id="adminStatusFilter">
+                  <button type="button" data-status-filter="" class="is-active">All</button>
+                  <button type="button" data-status-filter="draft">Draft</button>
+                  <button type="button" data-status-filter="published">Published</button>
+                  <button type="button" data-status-filter="archived">Archived</button>
+                </div>
+                <p class="status" id="adminListStatus"></p>
+                <div class="admin-article-list" id="adminArticleList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <template id="loginTemplate">
+      <section class="auth-page">
+        <div class="auth-panel">
+          <button class="back-link" type="button" id="backFromLogin">Back</button>
+          <div class="section-heading align-left">
+            <span>Admin</span>
+            <h2>Admin Login</h2>
+          </div>
+
+          <form class="auth-form" id="adminLoginForm">
+            <label for="adminEmail">
+              Email
+              <input
+                id="adminEmail"
+                name="email"
+                type="email"
+                autocomplete="email"
+                placeholder="admin@example.com"
+                required
+              />
             </label>
-            <label>
-              Зохиогч
-              <input name="author" type="text" placeholder="Нэр" required />
+            <label for="adminPassword">
+              Password
+              <input
+                id="adminPassword"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Password"
+                required
+              />
             </label>
-            <label>
-              House
-              <select name="categorySlug" id="articleCategory" required></select>
-            </label>
-            <label>
-              Зургийн холбоос
-              <input name="imageUrl" type="text" placeholder="https://example.com/image.jpg эсвэл /images/stagknight.jpg" />
-            </label>
-            <label class="wide">
-              Товч
-              <textarea name="excerpt" rows="3" placeholder="Нийтлэлийн богино тайлбар" required></textarea>
-            </label>
-            <label class="wide">
-              Нийтлэл
-              <textarea name="body" rows="9" placeholder="Энд бичнэ үү" required></textarea>
-            </label>
-            <div class="form-actions">
-              <p id="formStatus"></p>
-              <button type="submit">Нийтлэх</button>
+            <div class="auth-actions">
+              <p id="adminLoginStatus"></p>
+              <div class="auth-buttons">
+                <button type="submit" id="adminLoginSubmit">Enter</button>
+              </div>
             </div>
           </form>
         </div>
       </section>
     </template>
 
-    <footer class="site-footer">
+    <footer class="site-footer" id="aboutContact">
       <div class="footer-inner">
-        <strong>TOMUJIN ARTICLE</strong>
-        <span>2026 / Article-only learning project</span>
+        <section class="footer-column footer-about" aria-label="About Tomujin Article">
+          <h2>Бидний тухай</h2>
+          <p>Tomujin Article нь Tomujin Alternative School-ийн сурагчдын бичсэн бичвэр, нийтлэл, бодол, тэмдэглэлийг нэг дор цэгцтэй харуулах сурагчдын орон зай юм.</p>
+        </section>
+
+        <nav class="footer-column footer-social" aria-label="Contact links">
+          <h2>Холбоо барих</h2>
+          <a class="footer-contact-link" href="mailto:tomujinarticle@gmail.com" aria-label="Gmail">
+            <svg class="contact-icon" aria-hidden="true"><use href="#icon-gmail"></use></svg>
+            <span>tomujinarticle@gmail.com</span>
+          </a>
+          <a class="footer-contact-link" href="tel:+97677773111" aria-label="Phone">
+            <svg class="contact-icon contact-icon-phone" aria-hidden="true"><use href="#icon-phone"></use></svg>
+            <span>+976 7777 3111</span>
+          </a>
+          <a class="footer-contact-link" href="https://www.instagram.com/thetomujinacademy/" target="_blank" rel="noreferrer" aria-label="Instagram">
+            <svg class="contact-icon" aria-hidden="true"><use href="#icon-instagram"></use></svg>
+            <span>Instagram</span>
+          </a>
+          <a class="footer-contact-link" href="https://www.facebook.com/TomujinAlternativeSchool/" target="_blank" rel="noreferrer" aria-label="Facebook">
+            <svg class="contact-icon" aria-hidden="true"><use href="#icon-facebook"></use></svg>
+            <span>Facebook</span>
+          </a>
+        </nav>
       </div>
-      <button type="button" id="backTop">Top</button>
+      <button type="button" id="backTop" aria-label="Top">↑</button>
     </footer>
+    <button class="admin-button" id="adminLogin" type="button" aria-label="Админ">A</button>
   </body>
 </html>
