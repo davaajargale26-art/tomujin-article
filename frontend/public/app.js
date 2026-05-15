@@ -343,14 +343,39 @@ function renderParagraphs(value = "") {
 }
 
 async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
+  let response;
+
+  try {
+    response = await fetch(url, options);
+  } catch {
+    throw new Error("Cannot connect to backend");
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json") ? await response.json().catch(() => ({})) : {};
 
   if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error(data.message || "Wrong password");
+    }
+
+    if (response.status >= 500) {
+      throw new Error(data.message || "Server error");
+    }
+
     throw new Error(data.message || "Request failed");
   }
 
   return data;
+}
+
+function adminLoginErrorMessage(error = {}) {
+  const message = String(error.message || "");
+  if (!message || message === "Failed to fetch") return "Cannot connect to backend";
+  if (message === "Cannot connect to backend") return message;
+  if (message.toLowerCase().includes("wrong password") || message.toLowerCase().includes("invalid email")) return "Wrong password";
+  if (message.toLowerCase().includes("server") || message.toLowerCase().includes("configured")) return "Server error";
+  return message;
 }
 
 function setStatus(message = "") {
@@ -360,6 +385,7 @@ function setStatus(message = "") {
 }
 
 function updateAdminButton() {
+  if (!adminLogin) return;
   adminLogin.classList.toggle("is-active", state.isAdmin);
   adminLogin.textContent = state.isAdmin ? "A ✓" : "A";
   adminLogin.title = state.isAdmin ? "Админ горимоос гарах" : "Админ нэвтрэх";
@@ -645,7 +671,7 @@ function openAdminLogin({ pushUrl = false } = {}) {
       loginStatus.textContent = "Signed in.";
       await openAdminDashboard({ pushUrl: true });
     } catch (error) {
-      loginStatus.textContent = error.message || "Wrong email or password.";
+      loginStatus.textContent = adminLoginErrorMessage(error);
       passwordInput.select();
     } finally {
       submitButton.disabled = false;
@@ -1977,6 +2003,12 @@ async function openArticle(slug, { pushUrl = false } = {}) {
       url: window.location.href,
     });
 
+    const detailMetaParts = [
+      articleCategoryNames(article) || articleContentType(article),
+      formatDate(article.publishedAt),
+      article.author,
+    ].filter(Boolean);
+
     app.innerHTML = `
       <section class="article-detail">
         <div class="article-actions">
@@ -1985,6 +2017,7 @@ async function openArticle(slug, { pushUrl = false } = {}) {
         </div>
         <div class="detail-layout">
           <article class="detail-copy">
+            ${detailMetaParts.length ? `<p class="detail-meta">${detailMetaParts.map(escapeHtml).join(" / ")}</p>` : ""}
             <h1>${escapeHtml(article.title)}</h1>
             <p class="excerpt">${escapeHtml(article.excerpt)}</p>
             ${renderParagraphs(article.body)}
@@ -2105,15 +2138,16 @@ window.addEventListener("popstate", () => {
 async function startApp() {
   applyTheme();
   updateAdminButton();
+
+  if (isAdminPath() && !isAdminDashboardPath()) {
+    openAdminLogin();
+    return;
+  }
+
   await loadCategories();
 
   if (isAdminDashboardPath()) {
     await openAdminDashboard();
-    return;
-  }
-
-  if (isAdminPath()) {
-    openAdminLogin();
     return;
   }
 

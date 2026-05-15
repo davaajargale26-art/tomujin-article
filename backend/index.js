@@ -70,6 +70,13 @@ const defaultContentType = "Article";
 
 app.use(cors());
 app.use(express.json({ limit: "8mb" }));
+app.use((error, _req, res, next) => {
+  if (error instanceof SyntaxError && "body" in error) {
+    return res.status(400).json({ message: "Invalid JSON body." });
+  }
+
+  next(error);
+});
 
 fs.mkdirSync(uploadImagesPath, { recursive: true });
 
@@ -80,6 +87,7 @@ const dbBaseConfig = {
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
   waitForConnections: true,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS) || 10000,
   connectionLimit: 10,
 };
 
@@ -514,6 +522,60 @@ function requireAdmin(req, res, next) {
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message || "Admin auth failed." });
   }
+}
+
+function configuredAdminEmail() {
+  return String(process.env.ADMIN_EMAIL || process.env.OWNER_EMAIL || "").trim().toLowerCase();
+}
+
+function configuredAdminName() {
+  return String(process.env.ADMIN_NAME || process.env.OWNER_NAME || "Site Admin").trim() || "Site Admin";
+}
+
+async function configuredAdminPasswordHash() {
+  const passwordHash = String(process.env.ADMIN_PASSWORD_HASH || "").trim();
+  if (passwordHash) return passwordHash;
+
+  const password = String(process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD || "");
+  return password ? bcrypt.hash(password, 10) : "";
+}
+
+async function authenticateConfiguredAdmin(email, password) {
+  const adminEmail = configuredAdminEmail();
+  if (!adminEmail) return null;
+
+  const passwordHash = await configuredAdminPasswordHash();
+  if (!passwordHash) {
+    throw createHttpError("Admin login is not configured.", 503);
+  }
+
+  if (String(email || "").trim().toLowerCase() !== adminEmail) return null;
+
+  const correctPassword = await bcrypt.compare(String(password || ""), passwordHash);
+  if (!correctPassword) return null;
+
+  return {
+    id: 1,
+    name: configuredAdminName(),
+    email: adminEmail,
+    role: "owner",
+  };
+}
+
+async function ensureConfiguredDbAdmin() {
+  const email = configuredAdminEmail();
+  if (!email) return;
+
+  const passwordHash = await configuredAdminPasswordHash();
+  if (!passwordHash) return;
+
+  const [rows] = await db.query("SELECT id FROM admins WHERE email = ? LIMIT 1", [email]);
+  if (rows.length) return;
+
+  await db.query(
+    "INSERT INTO admins (name, email, password_hash, role) VALUES (?, ?, ?, 'owner')",
+    [configuredAdminName(), email, passwordHash]
+  );
 }
 
 const seedCategories = [
@@ -1320,6 +1382,8 @@ async function initializeNews() {
     await db.query("ALTER TABLE admins ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
   }
 
+  await ensureConfiguredDbAdmin();
+
   const [articleColumns] = await db.query(
     "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'news_articles' AND COLUMN_NAME IN ('featured', 'is_featured', 'featured_order', 'view_count', 'status', 'deleted_at', 'meta_title', 'meta_description', 'created_by_admin_id', 'updated_by_admin_id', 'author_slug', 'content_type', 'tags')",
     [dbName]
@@ -1819,21 +1883,38 @@ app.patch("/api/admin/categories/:slug", requireAdmin, async (req, res) => {
 async function completeAdminLogin(req, res) {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       return res.status(400).json({
         message: "Email and password are required."
       });
     }
 
+    if (usingMemoryStore) {
+      const configuredAdmin = await authenticateConfiguredAdmin(normalizedEmail, password);
+      if (!configuredAdmin) {
+        return res.status(401).json({
+          message: "Wrong password"
+        });
+      }
+
+      const adminProfile = sanitizeAdminProfile(configuredAdmin);
+      return res.json({
+        ok: true,
+        token: createAdminToken(adminProfile),
+        admin: adminProfile
+      });
+    }
+
     const [rows] = await db.query(
       "SELECT id, name, email, role, password_hash FROM admins WHERE email = ? LIMIT 1",
-      [email]
+      [normalizedEmail]
     );
 
     if (!rows.length) {
       return res.status(401).json({
-        message: "Invalid email or password."
+        message: "Wrong password"
       });
     }
 
@@ -1846,7 +1927,7 @@ async function completeAdminLogin(req, res) {
 
     if (!correctPassword) {
       return res.status(401).json({
-        message: "Invalid email or password."
+        message: "Wrong password"
       });
     }
 
@@ -1860,8 +1941,8 @@ async function completeAdminLogin(req, res) {
     });
 
   } catch (error) {
-    res.status(500).json({
-      message: "Could not login admin."
+    res.status(error.statusCode || 500).json({
+      message: error.statusCode === 503 ? error.message : "Server error"
     });
   }
 }
