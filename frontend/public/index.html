@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Tomujin Article нийтлэлийн сайт" />
-    <title>Tom/Art</title>
+    <title>Tom/Art | Student Publication</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@500;600;700;800;900&family=Noto+Sans:wght@400;500;600;700;800;900&family=Noto+Serif:wght@400;500;600;700&family=Noto+Serif+Display:wght@600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css" />
-    <script src="/app.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Serif:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css?v=20260520-v0-static-port" />
+    <script src="/app.js?v=20260520-v0-static-port" defer></script>
   </head>
   <body>
     <svg class="icon-sprite" aria-hidden="true" focusable="false">
@@ -51,50 +51,100 @@
           <path fill="#25d366" d="M11.7 38.3l1.6-5.8l-.4-.6a15 15 0 1 1 5.4 5.2l-.6-.4l-6 1.6z" />
           <path fill="#ffffff" d="M33.2 27.9c-.5-.3-3-1.5-3.5-1.7c-.5-.2-.8-.3-1.2.3c-.3.5-1.3 1.7-1.6 2c-.3.4-.6.4-1.1.1c-3.1-1.5-5.1-2.7-7.1-6.1c-.5-.9.5-.8 1.5-2.8c.2-.4.1-.8 0-1.1c-.1-.3-1.2-2.9-1.7-4c-.4-1.1-.9-.9-1.2-.9h-1c-.4 0-1 .1-1.5.7c-.5.5-2 2-2 4.8s2.1 5.6 2.4 6c.3.4 4.1 6.3 9.9 8.8c3.7 1.6 5.1 1.7 6.9 1.4c1.1-.2 3-1.2 3.4-2.4c.4-1.2.4-2.2.3-2.4c-.1-.2-.5-.4-1-.7z" />
         </symbol>
+
+        <symbol id="icon-outline-mail" viewBox="0 0 24 24">
+          <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M4.5 6.5h15v11h-15z" />
+          <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M5 7l7 6l7-6" />
+        </symbol>
+        <symbol id="icon-outline-phone" viewBox="0 0 24 24">
+          <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M7.2 4.8l2.2 4.1l-1.8 1.6c1.2 2.4 3.5 4.7 5.9 5.9l1.6-1.8l4.1 2.2c.4.2.6.7.4 1.1c-.6 1.4-1.8 2.3-3.3 2.6c-2.4.4-5.9-1.5-8.8-4.4s-4.8-6.4-4.4-8.8c.3-1.5 1.2-2.7 2.6-3.3c.4-.2.9 0 1.1.4z" />
+        </symbol>
+        <symbol id="icon-outline-instagram" viewBox="0 0 24 24">
+          <rect x="5" y="5" width="14" height="14" rx="4" fill="none" stroke="currentColor" stroke-width="1.9" />
+          <circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.9" />
+          <circle cx="16.7" cy="7.3" r="0.9" fill="currentColor" />
+        </symbol>
+        <symbol id="icon-outline-facebook" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M14.1 8.5h2.2V5.1c-.4-.1-1.6-.2-3-.2c-3 0-5 1.8-5 5.2v2.9H5v3.8h3.3V23h4.1v-6.2h3.2l.5-3.8h-3.7v-2.5c0-1.1.3-2 1.7-2z" />
+        </symbol>
       </defs>
     </svg>
 
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/" aria-label="Tomujin Article home">
-          <span class="brand-logo" aria-hidden="true">
-            <span>TOM</span><span class="brand-slash">/</span><span>ART</span>
+          <span class="brand-mark" aria-hidden="true">T</span>
+          <span class="brand-copy">
+            <strong>Tom/Art</strong>
+            <small>Student publication</small>
           </span>
         </a>
+
+        <div class="mobile-header-actions" aria-label="Mobile tools">
+          <button class="mobile-icon-button mobile-menu-button" type="button" id="mobileMenuToggle" aria-label="Menu" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <button class="mobile-icon-button" type="button" id="mobileSearchToggle" aria-label="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6a7.3 7.3 0 0 1 0 14.6Zm5.3-2l4.4 4.4" />
+            </svg>
+          </button>
+          <button class="mobile-icon-button theme-icon-toggle" type="button" id="mobileThemeToggle" aria-label="Toggle theme">
+            <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v2.2M12 18.8V21M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M3 12h2.2M18.8 12H21M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" />
+              <circle cx="12" cy="12" r="4.2" />
+            </svg>
+            <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.2 14.4A7.7 7.7 0 0 1 9.6 3.8A8.2 8.2 0 1 0 20.2 14.4Z" />
+            </svg>
+          </button>
+        </div>
 
         <div class="category-area">
           <nav class="main-nav" id="categoryNav" aria-label="Article categories"></nav>
         </div>
 
+        <div class="header-actions" aria-label="Site tools">
+          <form class="header-search" id="headerSearchForm">
+            <input id="headerSearchInput" type="search" placeholder="Search essays and articles..." />
+            <button type="submit" aria-label="Хайх">
+              <span class="visually-hidden">Search</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10.8 18.1a7.3 7.3 0 1 1 0-14.6a7.3 7.3 0 0 1 0 14.6Zm5.3-2l4.4 4.4" />
+              </svg>
+            </button>
+          </form>
+          <button class="theme-toggle theme-icon-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
+            <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v2.2M12 18.8V21M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M3 12h2.2M18.8 12H21M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" />
+              <circle cx="12" cy="12" r="4.2" />
+            </svg>
+            <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.2 14.4A7.7 7.7 0 0 1 9.6 3.8A8.2 8.2 0 1 0 20.2 14.4Z" />
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
-
-    <div class="header-actions" aria-label="Site tools">
-      <form class="header-search" id="headerSearchForm">
-        <input id="headerSearchInput" type="search" placeholder="Нийтлэл хайх" />
-        <button type="submit" aria-label="Хайх">Search</button>
-      </form>
-    </div>
-    <button class="theme-toggle side-theme-toggle" type="button" id="themeToggle" aria-label="Өнгө солих">Цагаан</button>
 
     <main id="app"></main>
 
     <template id="homeTemplate">
-      <div class="substack-home-shell">
-        <div class="substack-feed">
       <section class="hero" id="heroCarousel">
         <div class="hero-titlebar">
-          <span>Онцлох</span>
-          <small>Featured stories</small>
+          <span>Hot Posts</span>
         </div>
         <div class="hero-track" id="heroTrack">
           <a class="hero-slide is-active" href="#news">
-            <img class="hero-image" src="/images/stagknight.jpg" alt="" />
+            <div class="hero-media">
+              <img class="hero-image" src="/images/stagknight.jpg" alt="" />
+            </div>
             <div class="hero-overlay">
-              <span class="eyebrow">Tomujin / Editorial</span>
-              <h1>TOMUJIN ARTICLE</h1>
-              <p>Сурагчдын бичсэн нийтлэл, бодол, тэмдэглэлийг нэг дор цэгцтэй унших орчин.</p>
-              <strong>Нийтлэлүүд</strong>
+              <span class="hero-kicker">Tom/Art Editorial</span>
+              <h1>Thoughtful writing for curious minds</h1>
+              <p>Сурагчдын бичсэн эссе, нийтлэл, тэмдэглэл, ярилцлагыг нэг дор цэгцтэй унших орчин.</p>
             </div>
           </a>
         </div>
@@ -103,49 +153,33 @@
         <div class="hero-dots" id="heroDots"></div>
       </section>
 
-      <section class="section" id="news">
-        <div class="section-heading">
-          <span>Writings</span>
-          <h2>Alumni writing archive</h2>
-        </div>
+      <main class="publication-main">
+        <section class="publication-intro" aria-label="Publication introduction">
+          <div>
+            <h1>Thoughtful writing for curious minds</h1>
+            <p>Explore student essays, articles, reviews, interviews, poems, notes, and podcasts from the Tomujin community.</p>
+          </div>
+        </section>
 
-        <div class="archive-filters" id="archiveFilters"></div>
-        <p class="status" id="status"></p>
-        <div class="post-grid" id="articleGrid"></div>
-        <nav class="post-pagination" id="articlePagination" aria-label="Article pages"></nav>
-      </section>
+        <section class="section" id="news">
+          <div class="section-heading">
+            <span>Latest writing</span>
+            <h2>Student publication archive</h2>
+          </div>
 
-        </div>
+          <div class="archive-filters" id="archiveFilters"></div>
+          <p class="status" id="status"></p>
+          <div class="post-grid" id="articleGrid"></div>
+          <nav class="post-pagination" id="articlePagination" aria-label="Article pages"></nav>
+        </section>
 
-        <aside class="substack-right-rail" aria-label="Homepage sidebar">
-          <section class="rail-card rail-intro-card">
-            <span class="rail-logo">TOM/ART</span>
-            <h2>Бидний тухай</h2>
-            <p>Энэ сайт нь Tomujin Alternative School-ийн сурагчдын бичсэн бичвэр, нийтлэл, бодол, тэмдэглэлийг олон нийтэд хүргэх зорилготой.</p>
-            <div class="rail-contact-icons" aria-label="Contact links">
-              <a href="#aboutContact" aria-label="Facebook contact">
-                <svg class="contact-icon" aria-hidden="true"><use href="#icon-facebook"></use></svg>
-              </a>
-              <a href="#aboutContact" aria-label="Instagram contact">
-                <svg class="contact-icon" aria-hidden="true"><use href="#icon-instagram"></use></svg>
-              </a>
-              <a href="#aboutContact" aria-label="Phone contact">
-                <svg class="contact-icon contact-icon-phone" aria-hidden="true"><use href="#icon-phone"></use></svg>
-              </a>
-              <a href="#aboutContact" aria-label="Gmail contact">
-                <svg class="contact-icon" aria-hidden="true"><use href="#icon-gmail"></use></svg>
-              </a>
-            </div>
-          </section>
-
-          <section class="rail-card rail-posts-card">
-            <div class="rail-heading">
-              <strong>Бичвэрүүд</strong>
-            </div>
-            <div class="rail-article-list" id="railArticleList"></div>
-          </section>
+        <aside class="publication-rail" aria-label="Recent posts">
+          <div class="rail-heading">
+            <strong>Recent</strong>
+          </div>
+          <div class="rail-article-list" id="railArticleList"></div>
         </aside>
-      </div>
+      </main>
     </template>
 
     <template id="adminTemplate">
@@ -408,29 +442,36 @@
     <footer class="site-footer" id="aboutContact">
       <div class="footer-inner">
         <section class="footer-column footer-about" aria-label="About Tomujin Article">
-          <h2>Бидний тухай</h2>
-          <p>Tomujin Article нь Tomujin Alternative School-ийн сурагчдын бичсэн бичвэр, нийтлэл, бодол, тэмдэглэлийг нэг дор цэгцтэй харуулах сурагчдын орон зай юм.</p>
+          <h2>Tom/Art</h2>
+          <p>Thoughtful writing from Tomujin students. Essays, stories, reviews, interviews, notes, and publication experiments in one calm reading space.</p>
           <a class="footer-admin-link" href="/admin">Admin</a>
         </section>
 
+        <section class="footer-column" aria-label="About the publication">
+          <h2>About Us</h2>
+          <p>Tom/Art shares student voices with a clean editorial format built for reading, discovery, and publishing through the existing admin system.</p>
+        </section>
+
         <nav class="footer-column footer-social" aria-label="Contact links">
-          <h2>Холбоо барих</h2>
-          <a class="footer-contact-link" href="mailto:tomujinarticle@gmail.com" aria-label="Gmail">
-            <svg class="contact-icon" aria-hidden="true"><use href="#icon-gmail"></use></svg>
-            <span>tomujinarticle@gmail.com</span>
-          </a>
-          <a class="footer-contact-link" href="tel:+97677773111" aria-label="Phone">
-            <svg class="contact-icon contact-icon-phone" aria-hidden="true"><use href="#icon-phone"></use></svg>
-            <span>+976 7777 3111</span>
-          </a>
-          <a class="footer-contact-link" href="https://www.instagram.com/thetomujinacademy/" target="_blank" rel="noreferrer" aria-label="Instagram">
-            <svg class="contact-icon" aria-hidden="true"><use href="#icon-instagram"></use></svg>
-            <span>Instagram</span>
-          </a>
-          <a class="footer-contact-link" href="https://www.facebook.com/TomujinAlternativeSchool/" target="_blank" rel="noreferrer" aria-label="Facebook">
-            <svg class="contact-icon" aria-hidden="true"><use href="#icon-facebook"></use></svg>
-            <span>Facebook</span>
-          </a>
+          <h2>Contact</h2>
+          <div class="footer-socials">
+            <a href="mailto:tomujinarticle@gmail.com" aria-label="Gmail">
+              <svg aria-hidden="true"><use href="#icon-outline-mail"></use></svg>
+              <span class="visually-hidden">tomujinarticle@gmail.com</span>
+            </a>
+            <a href="tel:+97677773111" aria-label="Phone">
+              <svg aria-hidden="true"><use href="#icon-outline-phone"></use></svg>
+              <span class="visually-hidden">+976 7777 3111</span>
+            </a>
+            <a href="https://www.instagram.com/thetomujinacademy/" target="_blank" rel="noreferrer" aria-label="Instagram">
+              <svg aria-hidden="true"><use href="#icon-outline-instagram"></use></svg>
+              <span class="visually-hidden">Instagram</span>
+            </a>
+            <a href="https://www.facebook.com/TomujinAlternativeSchool/" target="_blank" rel="noreferrer" aria-label="Facebook">
+              <svg aria-hidden="true"><use href="#icon-outline-facebook"></use></svg>
+              <span class="visually-hidden">Facebook</span>
+            </a>
+          </div>
         </nav>
       </div>
       <button type="button" id="backTop" aria-label="Top">↑</button>

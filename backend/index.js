@@ -1,6 +1,10 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const { v2: cloudinary } = require("cloudinary");
+const sanitizeHtml = require("sanitize-html");
 const crypto = require("crypto");
 const fs = require("fs");
 const jwt = require("jsonwebtoken");
@@ -28,6 +32,10 @@ function isEnabled(value) {
   return ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 }
 
+function isTruthy(value) {
+  return value === true || ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
+}
+
 function quoteIdentifier(value) {
   return `\`${String(value).replace(/`/g, "``")}\``;
 }
@@ -40,8 +48,18 @@ const publicPath = path.join(__dirname, "..", "frontend", "public");
 const publicImagesPath = path.join(publicPath, "images");
 const uploadImagesPath = path.join(publicImagesPath, "uploads");
 const fallbackImageUrl = "/images/stagknight.jpg";
-const jwtSecret = process.env.JWT_SECRET || "tomujin-article-local-admin-session-secret";
+const jwtSecret = process.env.JWT_SECRET 
 const adminSessionTtl = process.env.ADMIN_SESSION_TTL || "6h";
+const cloudinaryConfig = {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+};
+const hasCloudinaryConfig = Boolean(
+  cloudinaryConfig.cloud_name &&
+  cloudinaryConfig.api_key &&
+  cloudinaryConfig.api_secret
+);
 const allowedImageExtensions = new Set([".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp"]);
 const allowedImageMimeTypes = new Map([
   ["image/avif", ".avif"],
@@ -68,7 +86,32 @@ const contentTypeOptions = [
 ];
 const defaultContentType = "Article";
 
-app.use(cors());
+const allowedOrigins = String(process.env.ALLOWED_ORIGINS || "http://localhost:8890,http://localhost:5500,http://127.0.0.1:5500")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+if (process.env.TRUST_PROXY || isEnabled(process.env.RENDER)) {
+  app.set("trust proxy", 1);
+}
+
+if (hasCloudinaryConfig) {
+  cloudinary.config(cloudinaryConfig);
+}
+
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  }
+}));
 app.use(express.json({ limit: "8mb" }));
 app.use((error, _req, res, next) => {
   if (error instanceof SyntaxError && "body" in error) {
@@ -78,7 +121,25 @@ app.use((error, _req, res, next) => {
   next(error);
 });
 
-fs.mkdirSync(uploadImagesPath, { recursive: true });
+const adminLoginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.ADMIN_LOGIN_RATE_LIMIT || 10),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many login attempts. Try again later." },
+});
+
+const sensitiveRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.SENSITIVE_RATE_LIMIT || 120),
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { message: "Too many requests. Try again later." },
+});
+
+if (!isProduction()) {
+  fs.mkdirSync(uploadImagesPath, { recursive: true });
+}
 
 const dbName = process.env.DB_NAME || "loginapp";
 const dbBaseConfig = {
@@ -108,8 +169,59 @@ let memoryAuditLogs = [];
 let nextMemoryArticleId = 1;
 let nextMemoryAuditId = 1;
 
-function isTruthy(value) {
-  return value === true || value === 1 || value === "1" || value === "true" || value === "on";
+function logEvent(level, message, metadata = {}) {
+  const payload = {
+    level,
+    event: message,
+    time: new Date().toISOString(),
+    ...metadata,
+  };
+  const writer = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+  writer(JSON.stringify(payload));
+}
+
+function logRouteError(route, error, metadata = {}) {
+  logEvent("error", route, {
+    message: error?.message,
+    code: error?.code,
+    errno: error?.errno,
+    sqlState: error?.sqlState,
+    statusCode: error?.statusCode,
+    ...metadata,
+  });
+}
+
+function ensureMemoryFallbackReady() {
+  if (!memoryCategories.length || !memoryArticles.length) {
+    initializeMemoryStore();
+  }
+}
+
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+function requireEnv(name) {
+  const value = String(process.env[name] || "").trim();
+
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+
+  return value;
+}
+
+function assertRequiredProductionEnv() {
+  if (!isProduction()) return;
+
+  requireEnv("JWT_SECRET");
+  requireEnv("DB_HOST");
+  requireEnv("DB_USER");
+  requireEnv("DB_PASSWORD");
+  requireEnv("DB_NAME");
+  requireEnv("CLOUDINARY_CLOUD_NAME");
+  requireEnv("CLOUDINARY_API_KEY");
+  requireEnv("CLOUDINARY_API_SECRET");
 }
 
 function asPublicImageUrl(value) {
@@ -129,7 +241,7 @@ function normalizeCategorySlugs(payload = {}) {
       ? payload.categories.map((category) => (typeof category === "string" ? category : category?.slug))
       : [payload.categorySlug];
 
-  return [...new Set(rawValues.map((value) => String(value || "").trim()).filter(Boolean))];
+  return [...new Set(rawValues.map((value) => normalizeSlug(value)).filter(Boolean).slice(0, 8))];
 }
 
 function normalizeGraduationYears(value) {
@@ -205,6 +317,69 @@ function createHttpError(message, statusCode = 400) {
   return error;
 }
 
+function sanitizePlainText(value = "", maxLength = 220) {
+  return sanitizeHtml(String(value || ""), {
+    allowedTags: [],
+    allowedAttributes: {},
+  }).trim().slice(0, maxLength);
+}
+
+function sanitizeArticleBody(value = "") {
+  return sanitizeHtml(String(value || ""), {
+    allowedTags: [
+      "p", "br", "strong", "em", "b", "i", "u", "blockquote", "ul", "ol", "li",
+      "a", "h2", "h3", "h4", "pre", "code"
+    ],
+    allowedAttributes: {
+      a: ["href", "title", "target", "rel"],
+    },
+    allowedSchemes: ["http", "https", "mailto"],
+    transformTags: {
+      a: sanitizeHtml.simpleTransform("a", { rel: "noopener noreferrer" }, true),
+    },
+  }).trim().slice(0, 60000);
+}
+
+function isValidEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function assertStrongPassword(password) {
+  const value = String(password || "");
+  if (
+    value.length < 12 ||
+    !/[a-z]/.test(value) ||
+    !/[A-Z]/.test(value) ||
+    !/[0-9]/.test(value) ||
+    !/[^A-Za-z0-9]/.test(value)
+  ) {
+    throw createHttpError("Password must be at least 12 characters and include uppercase, lowercase, number, and symbol.");
+  }
+}
+
+function parsePagination(query = {}, { defaultLimit = 9, maxLimit = 50 } = {}) {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const rawLimit = Number.parseInt(query.limit, 10);
+  const limit = Math.min(maxLimit, Math.max(1, rawLimit || defaultLimit));
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+function hasPaginationQuery(query = {}) {
+  return query.page !== undefined || query.limit !== undefined;
+}
+
+function paginatedMemoryResponse(items, pagination) {
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pagination.limit));
+  return {
+    items: items.slice(pagination.offset, pagination.offset + pagination.limit),
+    page: pagination.page,
+    limit: pagination.limit,
+    total,
+    totalPages,
+  };
+}
+
 function sanitizeUploadBaseName(value = "") {
   const baseName = path
     .basename(String(value || "image"), path.extname(String(value || "")))
@@ -243,7 +418,7 @@ function hasExpectedImageSignature(buffer, mimeType) {
   return false;
 }
 
-function saveUploadedImage(payload = {}) {
+async function saveUploadedImage(payload = {}) {
   let mimeType = String(payload.mimeType || "").trim().toLowerCase();
   let base64Data = String(payload.data || "").trim();
   const dataUrlMatch = base64Data.match(/^data:([^;]+);base64,(.+)$/i);
@@ -279,6 +454,23 @@ function saveUploadedImage(payload = {}) {
   const originalExtension = path.extname(String(payload.fileName || "")).toLowerCase();
   const extension = allowedImageExtensions.has(originalExtension) && originalExtension !== ".jpeg" ? originalExtension : expectedExtension;
   const fileName = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString("hex")}-${sanitizeUploadBaseName(payload.fileName)}${extension}`;
+
+  if (hasCloudinaryConfig) {
+    const uploadResult = await cloudinary.uploader.upload(`data:${mimeType};base64,${buffer.toString("base64")}`, {
+      folder: process.env.CLOUDINARY_UPLOAD_FOLDER || "tomujin-article",
+      resource_type: "image",
+      public_id: path.basename(fileName, extension),
+      overwrite: false,
+    });
+
+    return uploadResult.secure_url;
+  }
+
+  if (isProduction()) {
+    throw createHttpError("Cloudinary is required for production image uploads.", 503);
+  }
+
+  fs.mkdirSync(uploadImagesPath, { recursive: true });
   const imagePath = path.join(uploadImagesPath, fileName);
   const publicUrl = `/images/uploads/${fileName}`;
 
@@ -323,13 +515,14 @@ function normalizeTags(value) {
   return [...new Set(
     rawValues
       .map((tag) => String(tag || "").trim())
+      .map((tag) => sanitizePlainText(tag, 40))
       .filter(Boolean)
       .slice(0, 16)
   )];
 }
 
 function normalizeCategoryPayload(payload = {}) {
-  const name = String(payload.name || "").trim().slice(0, 140);
+  const name = sanitizePlainText(payload.name, 140);
   const slug = normalizeSlug(payload.slug || name);
 
   if (!name || !slug) {
@@ -410,7 +603,17 @@ function parseStoredTags(value = "") {
 
 function normalizeSocialLinks(value) {
   const rawValues = Array.isArray(value) ? value : String(value || "").split(/\r?\n|,/);
-  return [...new Set(rawValues.map((link) => String(link || "").trim()).filter(Boolean).slice(0, 8))];
+  return [...new Set(rawValues
+    .map((link) => String(link || "").trim())
+    .filter((link) => {
+      try {
+        const parsed = new URL(link);
+        return ["http:", "https:"].includes(parsed.protocol);
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, 8))];
 }
 
 function parseStoredSocialLinks(value = "") {
@@ -424,12 +627,12 @@ function parseStoredSocialLinks(value = "") {
 
 function alumniProfileFromPayload(payload = {}, article = {}) {
   return {
-    author: article.author || String(payload.author || "").trim(),
+    author: article.author || sanitizePlainText(payload.author, 140),
     authorSlug: authorSlugFromName(article.author || payload.author),
-    bio: String(payload.authorBio || payload.bio || "").trim().slice(0, 1200),
-    university: String(payload.authorUniversity || payload.university || "").trim().slice(0, 180),
-    major: String(payload.authorMajor || payload.major || "").trim().slice(0, 180),
-    currentWork: String(payload.authorCurrentWork || payload.currentWork || "").trim().slice(0, 220),
+    bio: sanitizePlainText(payload.authorBio || payload.bio, 1200),
+    university: sanitizePlainText(payload.authorUniversity || payload.university, 180),
+    major: sanitizePlainText(payload.authorMajor || payload.major, 180),
+    currentWork: sanitizePlainText(payload.authorCurrentWork || payload.currentWork, 220),
     socialLinks: normalizeSocialLinks(payload.authorSocialLinks || payload.socialLinks),
   };
 }
@@ -537,7 +740,10 @@ async function configuredAdminPasswordHash() {
   if (passwordHash) return passwordHash;
 
   const password = String(process.env.ADMIN_PASSWORD || process.env.OWNER_PASSWORD || "");
-  return password ? bcrypt.hash(password, 10) : "";
+  if (password && isProduction()) {
+    assertStrongPassword(password);
+  }
+  return password ? bcrypt.hash(password, 12) : "";
 }
 
 async function authenticateConfiguredAdmin(email, password) {
@@ -981,10 +1187,10 @@ function validateArticlePayload(payload) {
   const graduationYears = normalizeGraduationYears(payload.graduationYears || payload.graduationYear);
   const article = {
     slug: normalizeSlug(payload.slug || payload.title),
-    title: String(payload.title || "").trim(),
-    excerpt: String(payload.excerpt || "").trim(),
-    body: String(payload.body || "").trim(),
-    author: String(payload.author || "").trim(),
+    title: sanitizePlainText(payload.title, 220),
+    excerpt: sanitizePlainText(payload.excerpt, 900),
+    body: sanitizeArticleBody(payload.body),
+    author: sanitizePlainText(payload.author, 140),
     authorSlug: authorSlugFromName(payload.author),
     contentType: normalizeContentType(payload.contentType),
     categorySlugs,
@@ -993,8 +1199,8 @@ function validateArticlePayload(payload) {
     tags: normalizeTags(payload.tags),
     imageUrl: normalizeImageUrl(payload.imageUrl),
     status: normalizeArticleStatus(payload.status, "published"),
-    metaTitle: String(payload.metaTitle || "").trim().slice(0, 220),
-    metaDescription: String(payload.metaDescription || "").trim().slice(0, 320),
+    metaTitle: sanitizePlainText(payload.metaTitle, 220),
+    metaDescription: sanitizePlainText(payload.metaDescription, 320),
     publishedAt: normalizePublishedAt(payload.publishedAt || payload.publishDate),
     featured: isTruthy(payload.isFeatured) || isTruthy(payload.featured),
     featuredOrder: normalizeFeaturedOrder(payload.featuredOrder),
@@ -1225,9 +1431,9 @@ function getMemoryAuditLogs(slug) {
     }));
 }
 
-async function addDbAuditLog(articleId, admin, action, details = {}) {
+async function addDbAuditLog(articleId, admin, action, details = {}, executor = db) {
   const profile = sanitizeAdminProfile(admin);
-  await db.query(
+  await executor.query(
     `
     INSERT INTO article_audit_logs
       (article_id, admin_id, admin_name, admin_email, admin_role, action, details)
@@ -1273,7 +1479,47 @@ async function ensureDatabase() {
   await adminDb.end();
 }
 
-async function initializeNews() {
+async function ensureDbIndex(tableName, indexName, createSql, { optional = false } = {}) {
+  const [rows] = await db.query(
+    "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1",
+    [dbName, tableName, indexName]
+  );
+
+  if (rows.length) return;
+
+  try {
+    await db.query(createSql);
+  } catch (error) {
+    if (optional) {
+      logEvent("warn", "optional index skipped", {
+        tableName,
+        indexName,
+        message: error.message,
+        code: error.code,
+      });
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function ensureDbIndexes() {
+  await ensureDbIndex("news_articles", "news_articles_slug_idx", "CREATE INDEX news_articles_slug_idx ON news_articles (slug)");
+  await ensureDbIndex("news_articles", "news_articles_status_idx", "CREATE INDEX news_articles_status_idx ON news_articles (status)");
+  await ensureDbIndex("news_articles", "news_articles_published_at_idx", "CREATE INDEX news_articles_published_at_idx ON news_articles (published_at)");
+  await ensureDbIndex("news_articles", "news_articles_is_featured_idx", "CREATE INDEX news_articles_is_featured_idx ON news_articles (is_featured)");
+  await ensureDbIndex("news_articles", "news_articles_author_slug_idx", "CREATE INDEX news_articles_author_slug_idx ON news_articles (author_slug)");
+  await ensureDbIndex("news_articles", "news_articles_content_type_idx", "CREATE INDEX news_articles_content_type_idx ON news_articles (content_type)");
+  await ensureDbIndex(
+    "news_articles",
+    "news_articles_fulltext_idx",
+    "CREATE FULLTEXT INDEX news_articles_fulltext_idx ON news_articles (title, excerpt, body)",
+    { optional: true }
+  );
+}
+
+async function runDatabaseMigrations() {
   await ensureDatabase();
 
   await db.query(`
@@ -1385,7 +1631,7 @@ async function initializeNews() {
   await ensureConfiguredDbAdmin();
 
   const [articleColumns] = await db.query(
-    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'news_articles' AND COLUMN_NAME IN ('featured', 'is_featured', 'featured_order', 'view_count', 'status', 'deleted_at', 'meta_title', 'meta_description', 'created_by_admin_id', 'updated_by_admin_id', 'author_slug', 'content_type', 'tags')",
+    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'news_articles' AND COLUMN_NAME IN ('featured', 'is_featured', 'featured_order', 'view_count', 'status', 'deleted_at', 'meta_title', 'meta_description', 'created_by_admin_id', 'updated_by_admin_id', 'author_slug', 'content_type', 'tags', 'published_at')",
     [dbName]
   );
   const articleColumnNames = new Set(articleColumns.map((column) => column.COLUMN_NAME));
@@ -1442,6 +1688,10 @@ async function initializeNews() {
     await db.query("ALTER TABLE news_articles ADD COLUMN tags TEXT NULL");
   }
 
+  if (!articleColumnNames.has("published_at")) {
+    await db.query("ALTER TABLE news_articles ADD COLUMN published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+  }
+
   await db.query("ALTER TABLE news_articles MODIFY COLUMN image_url VARCHAR(1000) NULL");
   await db.query("UPDATE news_articles SET status = 'published' WHERE status IS NULL OR status = ''");
   await db.query("UPDATE news_articles SET content_type = 'Article' WHERE content_type IS NULL OR content_type = ''");
@@ -1450,6 +1700,8 @@ async function initializeNews() {
   for (const row of authorSlugRows) {
     await db.query("UPDATE news_articles SET author_slug = ? WHERE id = ?", [authorSlugFromName(row.author), row.id]);
   }
+
+  await ensureDbIndexes();
 
   await db.query(
     "INSERT INTO news_categories (slug, name) VALUES ? ON DUPLICATE KEY UPDATE name = VALUES(name)",
@@ -1488,6 +1740,7 @@ async function initializeNews() {
     INSERT IGNORE INTO news_article_categories (article_id, category_id)
     SELECT id, category_id
     FROM news_articles
+    WHERE category_id IS NOT NULL
   `);
 
   await db.query(
@@ -1501,6 +1754,10 @@ async function initializeNews() {
     `,
     [defaultGraduationYear]
   );
+}
+
+async function initializeNews() {
+  await runDatabaseMigrations();
 }
 
 function mapArticle(row) {
@@ -1641,8 +1898,8 @@ function articleSelectSql(whereSql, suffixSql = "") {
   `;
 }
 
-async function setDbArticleTaxonomy(articleId, categorySlugs, graduationYears) {
-  const [categoryRows] = await db.query(
+async function setDbArticleTaxonomy(articleId, categorySlugs, graduationYears, executor = db) {
+  const [categoryRows] = await executor.query(
     `SELECT id, slug FROM news_categories WHERE slug IN (${categorySlugs.map(() => "?").join(", ")})`,
     categorySlugs
   );
@@ -1654,20 +1911,20 @@ async function setDbArticleTaxonomy(articleId, categorySlugs, graduationYears) {
   const categoryIdsBySlug = Object.fromEntries(categoryRows.map((category) => [category.slug, category.id]));
   const orderedCategoryIds = categorySlugs.map((slug) => categoryIdsBySlug[slug]);
 
-  await db.query("DELETE FROM news_article_categories WHERE article_id = ?", [articleId]);
-  await db.query("INSERT INTO news_article_categories (article_id, category_id) VALUES ?", [
+  await executor.query("DELETE FROM news_article_categories WHERE article_id = ?", [articleId]);
+  await executor.query("INSERT INTO news_article_categories (article_id, category_id) VALUES ?", [
     orderedCategoryIds.map((categoryId) => [articleId, categoryId]),
   ]);
 
-  await db.query("DELETE FROM news_article_years WHERE article_id = ?", [articleId]);
-  await db.query("INSERT INTO news_article_years (article_id, graduation_year) VALUES ?", [
+  await executor.query("DELETE FROM news_article_years WHERE article_id = ?", [articleId]);
+  await executor.query("INSERT INTO news_article_years (article_id, graduation_year) VALUES ?", [
     graduationYears.map((year) => [articleId, year]),
   ]);
 
-  await db.query("UPDATE news_articles SET category_id = ? WHERE id = ?", [orderedCategoryIds[0], articleId]);
+  await executor.query("UPDATE news_articles SET category_id = ? WHERE id = ?", [orderedCategoryIds[0], articleId]);
 }
 
-async function upsertDbAlumniProfiles(article = {}) {
+async function upsertDbAlumniProfiles(article = {}, executor = db) {
   const author = String(article.author || "").trim();
   const authorSlug = article.authorSlug || authorSlugFromName(author);
   const profile = article.alumniProfile || {};
@@ -1675,7 +1932,7 @@ async function upsertDbAlumniProfiles(article = {}) {
   const graduationYears = article.graduationYears?.length ? article.graduationYears : [defaultGraduationYear];
 
   for (const graduationYear of graduationYears) {
-    await db.query(
+    await executor.query(
       `
       INSERT INTO alumni_profiles
         (author_slug, author, graduation_year, bio, university, major, current_work, social_links)
@@ -1702,20 +1959,20 @@ async function upsertDbAlumniProfiles(article = {}) {
   }
 }
 
-async function nextDbFeaturedOrder() {
-  const [rows] = await db.query("SELECT COALESCE(MAX(featured_order), 0) + 1 AS nextOrder FROM news_articles WHERE is_featured = 1");
+async function nextDbFeaturedOrder(executor = db) {
+  const [rows] = await executor.query("SELECT COALESCE(MAX(featured_order), 0) + 1 AS nextOrder FROM news_articles WHERE is_featured = 1");
   return Number(rows[0]?.nextOrder || 1);
 }
 
-async function assertDbFeaturedCapacity(exceptSlug = "") {
-  const [rows] = await db.query("SELECT COUNT(*) AS featuredCount FROM news_articles WHERE is_featured = 1 AND slug <> ?", [exceptSlug]);
+async function assertDbFeaturedCapacity(exceptSlug = "", executor = db) {
+  const [rows] = await executor.query("SELECT COUNT(*) AS featuredCount FROM news_articles WHERE is_featured = 1 AND slug <> ?", [exceptSlug]);
   if (Number(rows[0]?.featuredCount || 0) >= featuredLimit) {
     throw createHttpError(`Only ${featuredLimit} featured posts are allowed. Unfeature another article first.`);
   }
 }
 
-async function normalizeDbFeaturedOrders() {
-  const [featuredRows] = await db.query(
+async function normalizeDbFeaturedOrders(executor = db) {
+  const [featuredRows] = await executor.query(
     `
     SELECT slug
     FROM news_articles
@@ -1725,15 +1982,15 @@ async function normalizeDbFeaturedOrders() {
   );
 
   for (const [index, article] of featuredRows.entries()) {
-    await db.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, article.slug]);
+    await executor.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, article.slug]);
   }
 }
 
-async function setDbFeaturedPlacement(slug, featured, requestedOrder = null) {
-  const [targetRows] = await db.query("SELECT slug, is_featured, featured_order FROM news_articles WHERE slug = ? LIMIT 1", [slug]);
+async function setDbFeaturedPlacement(slug, featured, requestedOrder = null, executor = db) {
+  const [targetRows] = await executor.query("SELECT slug, is_featured, featured_order FROM news_articles WHERE slug = ? LIMIT 1", [slug]);
   if (targetRows.length === 0) return false;
 
-  const [featuredRows] = await db.query(
+  const [featuredRows] = await executor.query(
     `
     SELECT slug, featured_order, published_at, id
     FROM news_articles
@@ -1748,9 +2005,9 @@ async function setDbFeaturedPlacement(slug, featured, requestedOrder = null) {
   }
 
   if (!featured) {
-    await db.query("UPDATE news_articles SET is_featured = 0, featured_order = NULL WHERE slug = ?", [slug]);
+    await executor.query("UPDATE news_articles SET is_featured = 0, featured_order = NULL WHERE slug = ?", [slug]);
     for (const [index, article] of featuredRows.entries()) {
-      await db.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, article.slug]);
+      await executor.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, article.slug]);
     }
     return true;
   }
@@ -1761,9 +2018,9 @@ async function setDbFeaturedPlacement(slug, featured, requestedOrder = null) {
   const orderedSlugs = featuredRows.map((article) => article.slug);
   orderedSlugs.splice(insertIndex, 0, slug);
 
-  await db.query("UPDATE news_articles SET is_featured = 1 WHERE slug = ?", [slug]);
+  await executor.query("UPDATE news_articles SET is_featured = 1 WHERE slug = ?", [slug]);
   for (const [index, articleSlug] of orderedSlugs.entries()) {
-    await db.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, articleSlug]);
+    await executor.query("UPDATE news_articles SET featured_order = ? WHERE slug = ?", [index + 1, articleSlug]);
   }
 
   return true;
@@ -1786,7 +2043,7 @@ function uniqueMemorySlug(baseSlug, currentSlug = "") {
   return slug;
 }
 
-async function uniqueDbSlug(baseSlug, currentSlug = "") {
+async function uniqueDbSlug(baseSlug, currentSlug = "", executor = db) {
   const base = normalizeSlug(baseSlug) || "article";
   let slug = base;
   let index = 2;
@@ -1794,10 +2051,29 @@ async function uniqueDbSlug(baseSlug, currentSlug = "") {
   while (true) {
     const params = currentSlug ? [slug, currentSlug] : [slug];
     const where = currentSlug ? "slug = ? AND slug <> ?" : "slug = ?";
-    const [rows] = await db.query(`SELECT id FROM news_articles WHERE ${where} LIMIT 1`, params);
+    const [rows] = await executor.query(`SELECT id FROM news_articles WHERE ${where} LIMIT 1`, params);
     if (!rows.length) return slug;
     slug = `${base}-${index}`;
     index += 1;
+  }
+}
+
+async function withTransaction(work) {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await work(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      logRouteError("database rollback", rollbackError);
+    }
+    throw error;
+  } finally {
+    connection.release();
   }
 }
 
@@ -1834,7 +2110,13 @@ app.get("/api/categories", async (_req, res) => {
     );
 
     res.json(rows);
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/categories", error);
+    ensureMemoryFallbackReady();
+    if (!isProduction()) {
+      res.json(getMemoryCategories());
+      return;
+    }
     res.status(500).json({ message: "Could not load categories." });
   }
 });
@@ -1843,7 +2125,7 @@ app.get("/api/content-types", (_req, res) => {
   res.json(contentTypeOptions);
 });
 
-app.post("/api/admin/categories", requireAdmin, async (req, res) => {
+app.post("/api/admin/categories", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   try {
     assertEditorOrOwner(req.admin);
 
@@ -1855,12 +2137,13 @@ app.post("/api/admin/categories", requireAdmin, async (req, res) => {
     const [result] = await db.query("INSERT INTO news_categories (slug, name) VALUES (?, ?)", [category.slug, category.name]);
     res.status(201).json({ id: result.insertId, ...category, articleCount: 0 });
   } catch (error) {
+    logRouteError("POST /api/admin/categories", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY" || error?.statusCode === 409;
     res.status(isDuplicate ? 409 : error.statusCode || 500).json({ message: isDuplicate ? "Category slug already exists." : error.message || "Could not create category." });
   }
 });
 
-app.patch("/api/admin/categories/:slug", requireAdmin, async (req, res) => {
+app.patch("/api/admin/categories/:slug", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   try {
     assertEditorOrOwner(req.admin);
 
@@ -1875,11 +2158,11 @@ app.patch("/api/admin/categories/:slug", requireAdmin, async (req, res) => {
     if (result.affectedRows === 0) return res.status(404).json({ message: "Category not found." });
     res.json(category);
   } catch (error) {
+    logRouteError("PATCH /api/admin/categories/:slug", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY" || error?.statusCode === 409;
     res.status(isDuplicate ? 409 : error.statusCode || 500).json({ message: isDuplicate ? "Category slug already exists." : error.message || "Could not update category." });
   }
 });
-
 async function completeAdminLogin(req, res) {
   try {
     const { email, password } = req.body;
@@ -1941,13 +2224,14 @@ async function completeAdminLogin(req, res) {
     });
 
   } catch (error) {
+    logRouteError("POST /api/admin/login", error);
     res.status(error.statusCode || 500).json({
       message: error.statusCode === 503 ? error.message : "Server error"
     });
   }
 }
 
-app.post("/api/admin/login", completeAdminLogin);
+app.post("/api/admin/login", adminLoginRateLimiter, completeAdminLogin);
 
 app.post("/api/admin/verify", requireAdmin, (req, res) => {
   res.json({ ok: true, admin: sanitizeAdminProfile(req.admin) });
@@ -1957,29 +2241,57 @@ app.get("/api/admin/session", requireAdmin, (req, res) => {
   res.json({ ok: true, admin: sanitizeAdminProfile(req.admin) });
 });
 
+app.patch("/api/admin/password", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  try {
+    if (usingMemoryStore) {
+      return res.status(400).json({ message: "Password changes require database-backed admins." });
+    }
+
+    const currentPassword = String(req.body.currentPassword || "");
+    const nextPassword = String(req.body.newPassword || req.body.password || "");
+    if (!currentPassword || !nextPassword) {
+      return res.status(400).json({ message: "Current password and new password are required." });
+    }
+
+    assertStrongPassword(nextPassword);
+
+    const [rows] = await db.query("SELECT id, password_hash FROM admins WHERE id = ? LIMIT 1", [adminIdValue(req.admin)]);
+    if (!rows.length) return res.status(404).json({ message: "Admin not found." });
+
+    const currentPasswordOk = await bcrypt.compare(currentPassword, rows[0].password_hash);
+    if (!currentPasswordOk) return res.status(401).json({ message: "Current password is incorrect." });
+
+    const passwordHash = await bcrypt.hash(nextPassword, 12);
+    await db.query("UPDATE admins SET password_hash = ? WHERE id = ?", [passwordHash, rows[0].id]);
+    res.json({ ok: true });
+  } catch (error) {
+    logRouteError("PATCH /api/admin/password", error);
+    res.status(error.statusCode || 500).json({ message: error.message || "Could not change password." });
+  }
+});
+
 app.get("/api/admin/admins", requireAdmin, requireOwner, async (_req, res) => {
   try {
     const [rows] = await db.query("SELECT id, name, email, role, created_at FROM admins ORDER BY role = 'owner' DESC, name ASC, email ASC");
     res.json(rows.map(sanitizeAdminProfile));
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/admin/admins", error);
     res.status(500).json({ message: "Could not load admins." });
   }
 });
 
-app.post("/api/admin/admins", requireAdmin, requireOwner, async (req, res) => {
+app.post("/api/admin/admins", sensitiveRateLimiter, requireAdmin, requireOwner, async (req, res) => {
   try {
-    const name = String(req.body.name || "").trim();
+    const name = sanitizePlainText(req.body.name, 140);
     const email = String(req.body.email || "").trim().toLowerCase();
     const password = String(req.body.password || "");
     const role = normalizeAdminRole(req.body.role);
 
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !isValidEmail(email)) {
       return res.status(400).json({ message: "Name, email, and password are required." });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({ message: "Password must be at least 8 characters." });
-    }
+    assertStrongPassword(password);
 
     const passwordHash = await bcrypt.hash(password, 10);
     const [result] = await db.query(
@@ -1989,19 +2301,20 @@ app.post("/api/admin/admins", requireAdmin, requireOwner, async (req, res) => {
 
     res.status(201).json({ id: result.insertId, name, email, role });
   } catch (error) {
+    logRouteError("POST /api/admin/admins", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY";
-    res.status(isDuplicate ? 409 : 500).json({ message: isDuplicate ? "Admin email already exists." : "Could not add admin." });
+    res.status(isDuplicate ? 409 : error.statusCode || 500).json({ message: isDuplicate ? "Admin email already exists." : error.message || "Could not add admin." });
   }
 });
 
-app.patch("/api/admin/admins/:id", requireAdmin, requireOwner, async (req, res) => {
+app.patch("/api/admin/admins/:id", sensitiveRateLimiter, requireAdmin, requireOwner, async (req, res) => {
   try {
     const adminId = Number(req.params.id);
-    const name = String(req.body.name || "").trim();
+    const name = sanitizePlainText(req.body.name, 140);
     const email = String(req.body.email || "").trim().toLowerCase();
     const role = normalizeAdminRole(req.body.role);
 
-    if (!adminId || !name || !email) {
+    if (!adminId || !name || !email || !isValidEmail(email)) {
       return res.status(400).json({ message: "Name, email, and role are required." });
     }
 
@@ -2020,12 +2333,13 @@ app.patch("/api/admin/admins/:id", requireAdmin, requireOwner, async (req, res) 
     await db.query("UPDATE admins SET name = ?, email = ?, role = ? WHERE id = ?", [name, email, role, adminId]);
     res.json({ id: adminId, name, email, role });
   } catch (error) {
+    logRouteError("PATCH /api/admin/admins/:id", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY";
     res.status(isDuplicate ? 409 : 500).json({ message: isDuplicate ? "Admin email already exists." : "Could not update admin." });
   }
 });
 
-app.delete("/api/admin/admins/:id", requireAdmin, requireOwner, async (req, res) => {
+app.delete("/api/admin/admins/:id", sensitiveRateLimiter, requireAdmin, requireOwner, async (req, res) => {
   try {
     const adminId = Number(req.params.id);
     const [existingRows] = await db.query("SELECT id, role FROM admins WHERE id = ? LIMIT 1", [adminId]);
@@ -2042,29 +2356,58 @@ app.delete("/api/admin/admins/:id", requireAdmin, requireOwner, async (req, res)
 
     await db.query("DELETE FROM admins WHERE id = ?", [adminId]);
     res.json({ ok: true });
-  } catch {
+  } catch (error) {
+    logRouteError("DELETE /api/admin/admins/:id", error);
     res.status(500).json({ message: "Could not remove admin." });
   }
 });
 
-app.post("/api/admin/images", requireAdmin, (req, res) => {
+app.patch("/api/admin/admins/:id/password", sensitiveRateLimiter, requireAdmin, requireOwner, async (req, res) => {
   try {
-    const imageUrl = saveUploadedImage(req.body);
+    if (usingMemoryStore) {
+      return res.status(400).json({ message: "Password changes require database-backed admins." });
+    }
+
+    const adminId = Number(req.params.id);
+    const password = String(req.body.password || req.body.newPassword || "");
+    if (!adminId || !password) {
+      return res.status(400).json({ message: "Admin id and password are required." });
+    }
+
+    assertStrongPassword(password);
+    const [existingRows] = await db.query("SELECT id FROM admins WHERE id = ? LIMIT 1", [adminId]);
+    if (!existingRows.length) return res.status(404).json({ message: "Admin not found." });
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    await db.query("UPDATE admins SET password_hash = ? WHERE id = ?", [passwordHash, adminId]);
+    res.json({ ok: true });
+  } catch (error) {
+    logRouteError("PATCH /api/admin/admins/:id/password", error);
+    res.status(error.statusCode || 500).json({ message: error.message || "Could not change admin password." });
+  }
+});
+
+app.post("/api/admin/images", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  try {
+    const imageUrl = await saveUploadedImage(req.body);
     res.status(201).json({ ok: true, imageUrl });
   } catch (error) {
+    logRouteError("POST /api/admin/images", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not upload image." });
   }
 });
 
 app.get("/api/admin/articles", requireAdmin, async (req, res) => {
   const status = normalizeArticleStatus(req.query.status, "");
+  const pagination = parsePagination(req.query, { defaultLimit: 25, maxLimit: 100 });
+  const shouldPaginate = hasPaginationQuery(req.query);
 
   if (usingMemoryStore) {
     const articles = getMemoryArticles({ status, includeAdmin: true }).filter((article) => {
       if (isEditorOrOwner(req.admin)) return true;
       return article.status === "draft" && Number(article.createdByAdminId || 0) === Number(req.admin.id || 0);
     });
-    res.json(articles);
+    res.json(shouldPaginate ? paginatedMemoryResponse(articles, pagination) : articles);
     return;
   }
 
@@ -2082,13 +2425,31 @@ app.get("/api/admin/articles", requireAdmin, async (req, res) => {
       params.push(adminIdValue(req.admin) || 0);
     }
 
-    const [rows] = await db.query(
-      articleSelectSql(where.join(" AND "), "ORDER BY a.deleted_at IS NOT NULL, a.status = 'published' DESC, a.published_at DESC, a.id DESC"),
-      [...articleTaxonomyParams(), ...params]
+    const [countRows] = await db.query(
+      `SELECT COUNT(DISTINCT a.id) AS total FROM news_articles a WHERE ${where.join(" AND ")}`,
+      params
     );
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / pagination.limit));
+    const suffix = shouldPaginate
+      ? "ORDER BY a.deleted_at IS NOT NULL, a.status = 'published' DESC, a.published_at DESC, a.id DESC LIMIT ? OFFSET ?"
+      : "ORDER BY a.deleted_at IS NOT NULL, a.status = 'published' DESC, a.published_at DESC, a.id DESC";
+    const queryParams = shouldPaginate
+      ? [...articleTaxonomyParams(), ...params, pagination.limit, pagination.offset]
+      : [...articleTaxonomyParams(), ...params];
 
-    res.json(rows.map(mapArticle));
-  } catch {
+    const [rows] = await db.query(articleSelectSql(where.join(" AND "), suffix), queryParams);
+    const items = rows.map(mapArticle);
+
+    res.json(shouldPaginate ? {
+      items,
+      page: pagination.page,
+      limit: pagination.limit,
+      total,
+      totalPages,
+    } : items);
+  } catch (error) {
+    logRouteError("GET /api/admin/articles", error);
     res.status(500).json({ message: "Could not load admin articles." });
   }
 });
@@ -2101,6 +2462,7 @@ app.get("/api/admin/articles/:slug/audit", requireAdmin, async (req, res) => {
       assertCanEditArticle(req.admin, article);
       res.json(getMemoryAuditLogs(req.params.slug));
     } catch (error) {
+      logRouteError("GET /api/admin/articles/:slug/audit memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not load audit history." });
     }
     return;
@@ -2118,6 +2480,7 @@ app.get("/api/admin/articles/:slug/audit", requireAdmin, async (req, res) => {
 
     res.json(rows.map(mapAuditLog));
   } catch (error) {
+    logRouteError("GET /api/admin/articles/:slug/audit", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not load audit history." });
   }
 });
@@ -2162,7 +2525,8 @@ app.get("/api/alumni", async (req, res) => {
     );
 
     res.json(rows.map(mapAlumniProfile));
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/alumni", error);
     res.status(500).json({ message: "Could not load alumni profiles." });
   }
 });
@@ -2210,15 +2574,20 @@ app.get("/api/alumni/:year/:authorSlug", async (req, res) => {
     });
 
     res.json({ profile: { ...profile, articleCount: writings.length, latestPublishedAt: writings[0].publishedAt }, writings });
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/alumni/:year/:authorSlug", error);
     res.status(500).json({ message: "Could not load alumni profile." });
   }
 });
 
 app.get("/api/articles", async (req, res) => {
+  const pagination = parsePagination(req.query, { defaultLimit: 9, maxLimit: 50 });
+  const shouldPaginate = hasPaginationQuery(req.query);
+
   if (usingMemoryStore) {
     const { q = "", category = "", year = "", contentType = "", author = "" } = req.query;
-    res.json(getMemoryArticles({ q, category, year, contentType, author, editorPick: isTruthy(req.query.editorPick) }));
+    const articles = getMemoryArticles({ q, category, year, contentType, author, editorPick: isTruthy(req.query.editorPick) });
+    res.json(shouldPaginate ? paginatedMemoryResponse(articles, pagination) : articles);
     return;
   }
 
@@ -2258,13 +2627,45 @@ app.get("/api/articles", async (req, res) => {
       params.push(search, search, search, search, search, search);
     }
 
+    const [countRows] = await db.query(
+      `SELECT COUNT(DISTINCT a.id) AS total FROM news_articles a WHERE ${where.join(" AND ")}`,
+      params
+    );
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / pagination.limit));
+    const suffix = shouldPaginate
+      ? "ORDER BY a.published_at DESC, a.id DESC LIMIT ? OFFSET ?"
+      : "ORDER BY a.published_at DESC, a.id DESC";
+    const queryParams = shouldPaginate
+      ? [...articleTaxonomyParams(), ...params, pagination.limit, pagination.offset]
+      : [...articleTaxonomyParams(), ...params];
+
     const [rows] = await db.query(
-      articleSelectSql(where.join(" AND "), "ORDER BY a.published_at DESC, a.id DESC"),
-      [...articleTaxonomyParams(), ...params]
+      articleSelectSql(where.join(" AND "), suffix),
+      queryParams
     );
 
-    res.json(rows.map(mapArticle));
-  } catch {
+    const items = rows.map(mapArticle);
+    if (shouldPaginate) {
+      return res.json({
+        items,
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        totalPages,
+      });
+    }
+
+    res.json(items);
+  } catch (error) {
+    logRouteError("GET /api/articles", error);
+    ensureMemoryFallbackReady();
+    if (!isProduction()) {
+      const { q = "", category = "", year = "", contentType = "", author = "" } = req.query;
+      const articles = getMemoryArticles({ q, category, year, contentType, author, editorPick: isTruthy(req.query.editorPick) });
+      res.json(shouldPaginate ? paginatedMemoryResponse(articles, pagination) : articles);
+      return;
+    }
     res.status(500).json({ message: "Could not load articles." });
   }
 });
@@ -2290,7 +2691,18 @@ app.get("/api/articles/featured", async (_req, res) => {
     );
 
     res.json(rows.map(mapArticle));
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/articles/featured", error);
+    ensureMemoryFallbackReady();
+    if (!isProduction()) {
+      res.json(
+        getMemoryArticles()
+          .filter((article) => article.isFeatured)
+          .sort((left, right) => (left.featuredOrder || 9999) - (right.featuredOrder || 9999))
+          .slice(0, featuredLimit)
+      );
+      return;
+    }
     res.status(500).json({ message: "Could not load featured articles." });
   }
 });
@@ -2329,16 +2741,26 @@ app.get("/api/articles/:slug", async (req, res) => {
     }
 
     res.json(mapArticle(rows[0]));
-  } catch {
+  } catch (error) {
+    logRouteError("GET /api/articles/:slug", error);
+    ensureMemoryFallbackReady();
+    if (!isProduction()) {
+      const article = getMemoryArticle(req.params.slug, { incrementView: shouldIncrementView });
+      if (article) {
+        res.json(article);
+        return;
+      }
+    }
     res.status(500).json({ message: "Could not load article." });
   }
 });
 
-app.post("/api/articles", requireAdmin, async (req, res) => {
+app.post("/api/articles", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   if (usingMemoryStore) {
     try {
       res.status(201).json(createMemoryArticle(req.body, req.admin));
     } catch (error) {
+      logRouteError("POST /api/articles memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not save article." });
     }
 
@@ -2346,71 +2768,76 @@ app.post("/api/articles", requireAdmin, async (req, res) => {
   }
 
   try {
-    const article = validateArticlePayload(req.body);
-    assertCanCreateArticle(req.admin, article.status);
-    const [categoryRows] = await db.query("SELECT id FROM news_categories WHERE slug = ? LIMIT 1", [article.categorySlugs[0]]);
+    const savedArticle = await withTransaction(async (connection) => {
+      const article = validateArticlePayload(req.body);
+      assertCanCreateArticle(req.admin, article.status);
+      const [categoryRows] = await connection.query("SELECT id FROM news_categories WHERE slug = ? LIMIT 1", [article.categorySlugs[0]]);
 
-    if (categoryRows.length === 0) {
-      return res.status(400).json({ message: "Category not found." });
-    }
+      if (categoryRows.length === 0) {
+        throw createHttpError("Category not found.");
+      }
 
-    if (article.featured && article.status !== "published") {
-      throw createHttpError("Only published articles can be featured.");
-    }
+      if (article.featured && article.status !== "published") {
+        throw createHttpError("Only published articles can be featured.");
+      }
 
-    const slug = await uniqueDbSlug(article.slug || makeSlug(article.title));
-    if (article.featured) {
-      await assertDbFeaturedCapacity();
-    }
+      const slug = await uniqueDbSlug(article.slug || makeSlug(article.title), "", connection);
+      if (article.featured) {
+        await assertDbFeaturedCapacity("", connection);
+      }
 
-    const [insertResult] = await db.query(
-      `
-      INSERT INTO news_articles
-        (slug, category_id, title, excerpt, body, author, author_slug, image_url, content_type, tags, is_featured, featured_order, status, meta_title, meta_description, created_by_admin_id, updated_by_admin_id, published_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        slug,
-        categoryRows[0].id,
-        article.title,
-        article.excerpt,
-        article.body,
-        article.author,
-        article.authorSlug,
-        article.imageUrl,
-        article.contentType,
-        JSON.stringify(article.tags),
-        0,
-        null,
-        article.status,
-        article.metaTitle,
-        article.metaDescription,
-        adminIdValue(req.admin),
-        adminIdValue(req.admin),
-        article.publishedAt,
-      ]
-    );
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO news_articles
+          (slug, category_id, title, excerpt, body, author, author_slug, image_url, content_type, tags, is_featured, featured_order, status, meta_title, meta_description, created_by_admin_id, updated_by_admin_id, published_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          slug,
+          categoryRows[0].id,
+          article.title,
+          article.excerpt,
+          article.body,
+          article.author,
+          article.authorSlug,
+          article.imageUrl,
+          article.contentType,
+          JSON.stringify(article.tags),
+          0,
+          null,
+          article.status,
+          article.metaTitle,
+          article.metaDescription,
+          adminIdValue(req.admin),
+          adminIdValue(req.admin),
+          article.publishedAt,
+        ]
+      );
 
-    await setDbArticleTaxonomy(insertResult.insertId, article.categorySlugs, article.graduationYears);
-    await upsertDbAlumniProfiles(article);
-    await setDbFeaturedPlacement(slug, article.featured, article.featuredOrder);
-    await addDbAuditLog(insertResult.insertId, req.admin, "created", { status: article.status });
-    if (article.status === "published") {
-      await addDbAuditLog(insertResult.insertId, req.admin, "published", { status: article.status });
-    }
+      await setDbArticleTaxonomy(insertResult.insertId, article.categorySlugs, article.graduationYears, connection);
+      await upsertDbAlumniProfiles(article, connection);
+      await setDbFeaturedPlacement(slug, article.featured, article.featuredOrder, connection);
+      await addDbAuditLog(insertResult.insertId, req.admin, "created", { status: article.status }, connection);
+      if (article.status === "published") {
+        await addDbAuditLog(insertResult.insertId, req.admin, "published", { status: article.status }, connection);
+      }
 
-    const [rows] = await db.query(
-      articleSelectSql("a.slug = ?", "LIMIT 1"),
-      [...articleTaxonomyParams(), slug]
-    );
+      const [rows] = await connection.query(
+        articleSelectSql("a.slug = ?", "LIMIT 1"),
+        [...articleTaxonomyParams(), slug]
+      );
 
-    res.status(201).json(mapArticle(rows[0]));
+      return mapArticle(rows[0]);
+    });
+
+    res.status(201).json(savedArticle);
   } catch (error) {
+    logRouteError("POST /api/articles", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not save article." });
   }
 });
 
-app.put("/api/articles/:slug", requireAdmin, async (req, res) => {
+app.put("/api/articles/:slug", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   if (usingMemoryStore) {
     try {
       const article = updateMemoryArticle(req.params.slug, req.body, req.admin);
@@ -2420,6 +2847,7 @@ app.put("/api/articles/:slug", requireAdmin, async (req, res) => {
 
       res.json(article);
     } catch (error) {
+      logRouteError("PUT /api/articles/:slug memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not update article." });
     }
 
@@ -2427,87 +2855,92 @@ app.put("/api/articles/:slug", requireAdmin, async (req, res) => {
   }
 
   try {
-    const article = validateArticlePayload(req.body);
-    const [existingRows] = await db.query("SELECT id, status, deleted_at, created_by_admin_id FROM news_articles WHERE slug = ? LIMIT 1", [req.params.slug]);
+    const savedArticle = await withTransaction(async (connection) => {
+      const article = validateArticlePayload(req.body);
+      const [existingRows] = await connection.query("SELECT id, status, deleted_at, created_by_admin_id FROM news_articles WHERE slug = ? LIMIT 1 FOR UPDATE", [req.params.slug]);
 
-    if (existingRows.length === 0) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+      if (existingRows.length === 0) {
+        throw createHttpError("Article not found.", 404);
+      }
 
-    assertCanEditArticle(req.admin, existingRows[0]);
-    if (normalizeAdminRole(req.admin.role) === "writer" && article.status !== "draft") {
-      throw createHttpError("Writers can only save drafts.", 403);
-    }
+      assertCanEditArticle(req.admin, existingRows[0]);
+      if (normalizeAdminRole(req.admin.role) === "writer" && article.status !== "draft") {
+        throw createHttpError("Writers can only save drafts.", 403);
+      }
 
-    if (article.featured && article.status !== "published") {
-      throw createHttpError("Only published articles can be featured.");
-    }
+      if (article.featured && article.status !== "published") {
+        throw createHttpError("Only published articles can be featured.");
+      }
 
-    if (article.featured) {
-      await assertDbFeaturedCapacity(req.params.slug);
-    }
+      if (article.featured) {
+        await assertDbFeaturedCapacity(req.params.slug, connection);
+      }
 
-    const nextSlug = await uniqueDbSlug(article.slug || makeSlug(article.title), req.params.slug);
-    const [result] = await db.query(
-      `
-      UPDATE news_articles
-      SET slug = ?,
-          title = ?,
-          excerpt = ?,
-          body = ?,
-          author = ?,
-          author_slug = ?,
-          image_url = ?,
-          content_type = ?,
-          tags = ?,
-          status = ?,
-          deleted_at = NULL,
-          meta_title = ?,
-          meta_description = ?,
-          published_at = ?,
-          updated_by_admin_id = ?
-      WHERE slug = ?
-      `,
-      [
-        nextSlug,
-        article.title,
-        article.excerpt,
-        article.body,
-        article.author,
-        article.authorSlug,
-        article.imageUrl,
-        article.contentType,
-        JSON.stringify(article.tags),
-        article.status,
-        article.metaTitle,
-        article.metaDescription,
-        article.publishedAt,
-        adminIdValue(req.admin),
-        req.params.slug,
-      ]
-    );
+      const nextSlug = await uniqueDbSlug(article.slug || makeSlug(article.title), req.params.slug, connection);
+      const [result] = await connection.query(
+        `
+        UPDATE news_articles
+        SET slug = ?,
+            title = ?,
+            excerpt = ?,
+            body = ?,
+            author = ?,
+            author_slug = ?,
+            image_url = ?,
+            content_type = ?,
+            tags = ?,
+            status = ?,
+            deleted_at = NULL,
+            meta_title = ?,
+            meta_description = ?,
+            published_at = ?,
+            updated_by_admin_id = ?
+        WHERE slug = ?
+        `,
+        [
+          nextSlug,
+          article.title,
+          article.excerpt,
+          article.body,
+          article.author,
+          article.authorSlug,
+          article.imageUrl,
+          article.contentType,
+          JSON.stringify(article.tags),
+          article.status,
+          article.metaTitle,
+          article.metaDescription,
+          article.publishedAt,
+          adminIdValue(req.admin),
+          req.params.slug,
+        ]
+      );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+      if (result.affectedRows === 0) {
+        throw createHttpError("Article not found.", 404);
+      }
 
-    await setDbArticleTaxonomy(existingRows[0].id, article.categorySlugs, article.graduationYears);
-    await upsertDbAlumniProfiles(article);
-    await setDbFeaturedPlacement(nextSlug, article.featured && article.status === "published", article.featuredOrder);
-    await addDbAuditLog(existingRows[0].id, req.admin, "edited", { status: article.status, previousStatus: existingRows[0].status });
+      await setDbArticleTaxonomy(existingRows[0].id, article.categorySlugs, article.graduationYears, connection);
+      await upsertDbAlumniProfiles(article, connection);
+      await setDbFeaturedPlacement(nextSlug, article.featured && article.status === "published", article.featuredOrder, connection);
+      await addDbAuditLog(existingRows[0].id, req.admin, "edited", { status: article.status, previousStatus: existingRows[0].status }, connection);
 
-    const [rows] = await db.query(
-      articleSelectSql("a.slug = ?", "LIMIT 1"),
-      [...articleTaxonomyParams(), nextSlug]
-    );
+      const [rows] = await connection.query(
+        articleSelectSql("a.slug = ?", "LIMIT 1"),
+        [...articleTaxonomyParams(), nextSlug]
+      );
 
-    res.json(mapArticle(rows[0]));
+      return mapArticle(rows[0]);
+    });
+
+    res.json(savedArticle);
   } catch (error) {
+    logRouteError("PUT /api/articles/:slug", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not update article." });
   }
 });
 
-app.patch("/api/articles/:slug/featured", requireAdmin, async (req, res) => {
+app.patch("/api/articles/:slug/featured", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   const featured = isTruthy(req.body.isFeatured) || isTruthy(req.body.featured);
   const requestedOrder = normalizeFeaturedOrder(req.body.featuredOrder);
 
@@ -2520,45 +2953,44 @@ app.patch("/api/articles/:slug/featured", requireAdmin, async (req, res) => {
 
       res.json(article);
     } catch (error) {
+      logRouteError("PATCH /api/articles/:slug/featured memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not update featured status." });
     }
     return;
   }
 
   try {
-    assertEditorOrOwner(req.admin);
-    if (featured) {
-      const [articleRows] = await db.query("SELECT status, deleted_at FROM news_articles WHERE slug = ? LIMIT 1", [req.params.slug]);
-      if (!articleRows.length) return res.status(404).json({ message: "Article not found." });
-      if (articleRows[0].status !== "published" || articleRows[0].deleted_at) {
+    const savedArticle = await withTransaction(async (connection) => {
+      assertEditorOrOwner(req.admin);
+      const [articleRows] = await connection.query("SELECT id, status, deleted_at FROM news_articles WHERE slug = ? LIMIT 1 FOR UPDATE", [req.params.slug]);
+      if (!articleRows.length) throw createHttpError("Article not found.", 404);
+
+      if (featured && (articleRows[0].status !== "published" || articleRows[0].deleted_at)) {
         throw createHttpError("Only published articles can be featured.");
       }
-    }
 
-    const updated = await setDbFeaturedPlacement(req.params.slug, featured, requestedOrder);
+      const updated = await setDbFeaturedPlacement(req.params.slug, featured, requestedOrder, connection);
+      if (!updated) throw createHttpError("Article not found.", 404);
 
-    if (!updated) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+      await addDbAuditLog(articleRows[0].id, req.admin, featured ? "featured" : "unfeatured", { featuredOrder: requestedOrder }, connection);
 
-    const [articleRows] = await db.query("SELECT id FROM news_articles WHERE slug = ? LIMIT 1", [req.params.slug]);
-    if (articleRows.length) {
-      await addDbAuditLog(articleRows[0].id, req.admin, featured ? "featured" : "unfeatured", { featuredOrder: requestedOrder });
-    }
+      const [rows] = await connection.query(
+        articleSelectSql("a.slug = ?", "LIMIT 1"),
+        [...articleTaxonomyParams(), req.params.slug]
+      );
 
-    const [rows] = await db.query(
-      articleSelectSql("a.slug = ?", "LIMIT 1"),
-      [...articleTaxonomyParams(), req.params.slug]
-    );
+      return mapArticle(rows[0]);
+    });
 
-    res.json(mapArticle(rows[0]));
+    res.json(savedArticle);
   } catch (error) {
+    logRouteError("PATCH /api/articles/:slug/featured", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not update featured status." });
   }
 });
 
-app.patch("/api/articles/:slug/status", requireAdmin, async (req, res) => {
-  const status = normalizeArticleStatus(req.body.status, "");
+async function changeArticleStatus(req, res, requestedStatus) {
+  const status = normalizeArticleStatus(requestedStatus, "");
   if (!status) {
     return res.status(400).json({ message: "Valid status is required." });
   }
@@ -2569,54 +3001,76 @@ app.patch("/api/articles/:slug/status", requireAdmin, async (req, res) => {
       if (!article) return res.status(404).json({ message: "Article not found." });
       res.json(article);
     } catch (error) {
+      logRouteError("PATCH /api/articles/:slug/status memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not update article status." });
     }
     return;
   }
 
   try {
-    assertCanChangeArticleLifecycle(req.admin);
-    const [existingRows] = await db.query("SELECT id, status, is_featured, excerpt, body FROM news_articles WHERE slug = ? LIMIT 1", [req.params.slug]);
-    if (!existingRows.length) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+    const savedArticle = await withTransaction(async (connection) => {
+      assertCanChangeArticleLifecycle(req.admin);
+      const [existingRows] = await connection.query("SELECT id, status, is_featured, excerpt, body FROM news_articles WHERE slug = ? LIMIT 1 FOR UPDATE", [req.params.slug]);
+      if (!existingRows.length) {
+        throw createHttpError("Article not found.", 404);
+      }
 
-    if (status === "published" && (!String(existingRows[0].excerpt || "").trim() || !String(existingRows[0].body || "").trim())) {
-      return res.status(400).json({ message: "Published articles need an excerpt and body." });
-    }
+      if (status === "published" && (!String(existingRows[0].excerpt || "").trim() || !String(existingRows[0].body || "").trim())) {
+        throw createHttpError("Published articles need an excerpt and body.");
+      }
 
-    await db.query(
-      `
-      UPDATE news_articles
-      SET status = ?,
-          deleted_at = NULL,
-          is_featured = IF(? = 'published', is_featured, 0),
-          featured_order = IF(? = 'published', featured_order, NULL),
-          updated_by_admin_id = ?
-      WHERE slug = ?
-      `,
-      [status, status, status, adminIdValue(req.admin), req.params.slug]
-    );
+      await connection.query(
+        `
+        UPDATE news_articles
+        SET status = ?,
+            deleted_at = IF(? = 'archived', NOW(), NULL),
+            is_featured = IF(? = 'published', is_featured, 0),
+            featured_order = IF(? = 'published', featured_order, NULL),
+            updated_by_admin_id = ?
+        WHERE slug = ?
+        `,
+        [status, status, status, status, adminIdValue(req.admin), req.params.slug]
+      );
 
-    if (status !== "published" && existingRows[0].is_featured) {
-      await normalizeDbFeaturedOrders();
-    }
+      if (status !== "published" && existingRows[0].is_featured) {
+        await normalizeDbFeaturedOrders(connection);
+      }
 
-    const action = status === "published" ? "published" : status === "archived" ? "archived" : "restored";
-    await addDbAuditLog(existingRows[0].id, req.admin, action, { from: existingRows[0].status, to: status });
+      const action = status === "published" ? "published" : status === "archived" ? "archived" : "restored";
+      await addDbAuditLog(existingRows[0].id, req.admin, action, { from: existingRows[0].status, to: status }, connection);
 
-    const [rows] = await db.query(
-      articleSelectSql("a.slug = ?", "LIMIT 1"),
-      [...articleTaxonomyParams(), req.params.slug]
-    );
+      const [rows] = await connection.query(
+        articleSelectSql("a.slug = ?", "LIMIT 1"),
+        [...articleTaxonomyParams(), req.params.slug]
+      );
 
-    res.json(mapArticle(rows[0]));
+      return mapArticle(rows[0]);
+    });
+
+    res.json(savedArticle);
   } catch (error) {
+    logRouteError("PATCH /api/articles/:slug/status", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not update article status." });
   }
+}
+
+app.patch("/api/articles/:slug/status", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  return changeArticleStatus(req, res, req.body.status);
 });
 
-app.delete("/api/articles/:slug", requireAdmin, async (req, res) => {
+app.patch("/api/articles/:slug/unpublish", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  return changeArticleStatus(req, res, "draft");
+});
+
+app.patch("/api/articles/:slug/archive", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  return changeArticleStatus(req, res, "archived");
+});
+
+app.patch("/api/articles/:slug/restore", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  return changeArticleStatus(req, res, "draft");
+});
+
+app.delete("/api/articles/:slug", sensitiveRateLimiter, requireAdmin, async (req, res) => {
   if (usingMemoryStore) {
     try {
       if (!deleteMemoryArticle(req.params.slug, req.admin)) {
@@ -2625,37 +3079,45 @@ app.delete("/api/articles/:slug", requireAdmin, async (req, res) => {
 
       res.json({ ok: true });
     } catch (error) {
+      logRouteError("DELETE /api/articles/:slug memory", error);
       res.status(error.statusCode || 500).json({ message: error.message || "Could not delete article." });
     }
     return;
   }
 
   try {
-    assertCanChangeArticleLifecycle(req.admin);
-    const [existingRows] = await db.query("SELECT id, is_featured FROM news_articles WHERE slug = ? LIMIT 1", [req.params.slug]);
-    if (existingRows.length === 0) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+    await withTransaction(async (connection) => {
+      assertCanChangeArticleLifecycle(req.admin);
+      const [existingRows] = await connection.query("SELECT id, is_featured FROM news_articles WHERE slug = ? LIMIT 1 FOR UPDATE", [req.params.slug]);
+      if (existingRows.length === 0) {
+        throw createHttpError("Article not found.", 404);
+      }
 
-    const [result] = await db.query(
-      "UPDATE news_articles SET status = 'archived', deleted_at = NOW(), is_featured = 0, featured_order = NULL, updated_by_admin_id = ? WHERE slug = ?",
-      [adminIdValue(req.admin), req.params.slug]
-    );
+      const [result] = await connection.query(
+        "UPDATE news_articles SET status = 'archived', deleted_at = NOW(), is_featured = 0, featured_order = NULL, updated_by_admin_id = ? WHERE slug = ?",
+        [adminIdValue(req.admin), req.params.slug]
+      );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Article not found." });
-    }
+      if (result.affectedRows === 0) {
+        throw createHttpError("Article not found.", 404);
+      }
 
-    if (existingRows[0]?.is_featured) {
-      await normalizeDbFeaturedOrders();
-    }
+      if (existingRows[0]?.is_featured) {
+        await normalizeDbFeaturedOrders(connection);
+      }
 
-    await addDbAuditLog(existingRows[0].id, req.admin, "deleted", { softDelete: true });
+      await addDbAuditLog(existingRows[0].id, req.admin, "deleted", { softDelete: true }, connection);
+    });
 
     res.json({ ok: true });
   } catch (error) {
+    logRouteError("DELETE /api/articles/:slug", error);
     res.status(error.statusCode || 500).json({ message: error.message || "Could not delete article." });
   }
+});
+
+app.use("/api", (req, res) => {
+  res.status(404).json({ message: "API route not found." });
 });
 
 app.use(express.static(publicPath));
@@ -2669,14 +3131,34 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((error, req, res, _next) => {
+  logRouteError(`${req.method} ${req.path}`, error);
+  if (res.headersSent) return;
+  res.status(error.statusCode || 500).json({
+    message: error.statusCode && error.statusCode < 500 ? error.message : "Server error",
+  });
+});
+
+try {
+  assertRequiredProductionEnv();
+} catch (error) {
+  logEvent("error", "Startup configuration invalid.", { message: error.message });
+  process.exit(1);
+}
+
 initializeNews()
   .catch((error) => {
+    if (isProduction()) {
+      logEvent("error", "Database unavailable. Production server stopped.", { message: error.message, code: error.code });
+      process.exit(1);
+    }
+
     usingMemoryStore = true;
     initializeMemoryStore();
-    console.warn("Database unavailable; starting with sample in-memory articles:", error.message);
+    logEvent("warn", "Database unavailable; starting with sample in-memory articles.", { message: error.message, code: error.code });
   })
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`Tomujin Article running at http://localhost:${PORT}`);
+      logEvent("info", "Tomujin Article running.", { url: `http://localhost:${PORT}` });
     });
   });

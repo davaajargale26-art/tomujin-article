@@ -4,6 +4,7 @@ const state = {
   alumni: [],
   contentTypes: [],
   activeCategory: "",
+  activeMainSection: "",
   activeYear: "",
   activeAuthor: "",
   activeContentType: "",
@@ -24,6 +25,9 @@ const categoryNav = document.querySelector("#categoryNav");
 const headerSearchForm = document.querySelector("#headerSearchForm");
 const headerSearchInput = document.querySelector("#headerSearchInput");
 const themeToggle = document.querySelector("#themeToggle");
+const mobileSearchToggle = document.querySelector("#mobileSearchToggle");
+const mobileThemeToggle = document.querySelector("#mobileThemeToggle");
+const mobileMenuToggle = document.querySelector("#mobileMenuToggle");
 const homeButton = document.querySelector("#homeButton");
 const adminLogin = document.querySelector("#adminLogin");
 const backTop = document.querySelector("#backTop");
@@ -34,6 +38,21 @@ const themeStorageKey = "tomujinTheme";
 const fallbackImageUrl = "/images/stagknight.jpg";
 const featuredLimit = 4;
 const graduationYears = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
+const writingMenuCategories = [
+  { label: "Өгүүллэг", slug: "oguulleg", aliases: ["fantasy", "games"], names: ["Fantasy", "Answer"] },
+  { label: "Эссе", slug: "esse", aliases: ["guides", "education"], names: ["Эсээ", "Guide", "Education"] },
+  { label: "Дурсамж", slug: "dursamj", aliases: ["school-life", "university-life", "self-development"], names: ["School Life", "University Life", "Self Development"] },
+  { label: "Ярилцлага", slug: "yariltslaga", aliases: ["culture"], names: ["Ярилцлага"] },
+  { label: "Яруу найраг", slug: "yaruu-nairag", aliases: ["literature"], names: ["Literature"] },
+  { label: "Нийтлэл", slug: "niitlel", aliases: ["updates", "science", "technology"], names: ["Нийтлэл", "Science", "Technology"] },
+  { label: "Шүүмж", slug: "shuumej", aliases: ["interesting-facts", "psychology"], names: ["Interesting Facts", "Psychology"] },
+];
+const homepageSections = [
+  { key: "writing", label: "Сурагчдын Бичвэр", description: "Өгүүллэг, эссе, дурсамж, ярилцлага, яруу найраг, нийтлэл, шүүмж." },
+  { key: "books", label: "Ном", description: "Ном, уншлага, зохиолын тухай бичвэрүүд.", aliases: ["literature", "interesting-facts", "education", "fantasy", "art-design"] },
+  { key: "notes", label: "Зурвас", description: "Богино тэмдэглэл, бодол, сургуулийн амьдрал.", aliases: ["school-life", "university-life", "self-development", "social-issues", "career", "business"] },
+  { key: "podcast", label: "Подкаст", description: "Яриа, сонсох хэлбэрийн нийтлэлүүд.", aliases: ["technology", "psychology"], contentTypes: ["Podcast", "Audio"] },
+];
 const defaultContentTypes = [
   "Essay",
   "Article",
@@ -69,10 +88,36 @@ state.theme = window.localStorage.getItem(themeStorageKey) === "light" ? "light"
 
 function applyTheme() {
   document.body.dataset.theme = state.theme;
+  const isLight = state.theme === "light";
   if (themeToggle) {
-    themeToggle.textContent = state.theme === "light" ? "Хар" : "Цагаан";
-    themeToggle.setAttribute("aria-pressed", String(state.theme === "light"));
+    themeToggle.setAttribute("aria-pressed", String(isLight));
+    themeToggle.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+    themeToggle.title = isLight ? "Dark mode" : "Light mode";
   }
+  if (mobileThemeToggle) {
+    mobileThemeToggle.setAttribute("aria-pressed", String(isLight));
+    mobileThemeToggle.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+    mobileThemeToggle.title = isLight ? "Dark mode" : "Light mode";
+  }
+}
+
+function setMobilePanel(panel, isOpen) {
+  const searchOpen = panel === "search" ? isOpen : false;
+  const menuOpen = panel === "menu" ? isOpen : false;
+  document.body.classList.toggle("mobile-search-open", Boolean(searchOpen));
+  document.body.classList.toggle("mobile-menu-open", Boolean(menuOpen));
+  mobileSearchToggle?.setAttribute("aria-expanded", String(Boolean(searchOpen)));
+  mobileMenuToggle?.setAttribute("aria-expanded", String(Boolean(menuOpen)));
+}
+
+function closeMobileHeaderPanels() {
+  setMobilePanel("", false);
+}
+
+function toggleThemeMode() {
+  state.theme = state.theme === "light" ? "dark" : "light";
+  window.localStorage.setItem(themeStorageKey, state.theme);
+  applyTheme();
 }
 
 function formatDate(value) {
@@ -168,6 +213,78 @@ function tagsText(article = {}) {
 
 function articleImageUrl(article = {}) {
   return article.imageUrl || fallbackImageUrl;
+}
+
+function normalizedText(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function categoryConfigSlugs(config = {}) {
+  return [config.slug, ...(config.aliases || [])].filter(Boolean);
+}
+
+function categoryConfigNames(config = {}) {
+  return [config.label, ...(config.names || [])].filter(Boolean).map(normalizedText);
+}
+
+function liveCategoryForConfig(config = {}) {
+  const slugs = categoryConfigSlugs(config);
+  const names = categoryConfigNames(config);
+
+  for (const name of names) {
+    const category = state.categories.find((item) => normalizedText(item.name) === name);
+    if (category) return category;
+  }
+
+  for (const slug of slugs) {
+    const category = state.categories.find((item) => item.slug === slug);
+    if (category) return category;
+  }
+
+  return null;
+}
+
+function publicCategorySlug(config = {}) {
+  return liveCategoryForConfig(config)?.slug || config.slug;
+}
+
+function publicCategoryLabel(slug = "") {
+  const liveCategory = state.categories.find((category) => category.slug === slug);
+  if (liveCategory?.name) return liveCategory.name;
+
+  const writingCategory = writingMenuCategories.find((config) => categoryConfigSlugs(config).includes(slug));
+  if (writingCategory) return writingCategory.label;
+
+  return slug;
+}
+
+function sectionConfig(key = "") {
+  return homepageSections.find((section) => section.key === key);
+}
+
+function writingSectionSlugs() {
+  return Array.from(new Set(writingMenuCategories.flatMap((config) => categoryConfigSlugs(config).concat(publicCategorySlug(config)))));
+}
+
+function sectionSlugs(section = {}) {
+  if (section.key === "writing") return writingSectionSlugs();
+  return Array.from(new Set(section.aliases || []));
+}
+
+function articleMatchesSlugs(article = {}, slugs = []) {
+  const articleSlugs = articleCategorySlugs(article);
+  return articleSlugs.some((slug) => slugs.includes(slug));
+}
+
+function articleMatchesSection(article = {}, section = {}) {
+  if (!section) return false;
+  if (articleMatchesSlugs(article, sectionSlugs(section))) return true;
+  const contentTypes = section.contentTypes || [];
+  return contentTypes.includes(articleContentType(article));
+}
+
+function latestArticlesForSection(section = {}, limit = 5) {
+  return state.articles.filter((article) => articleMatchesSection(article, section)).slice(0, limit);
 }
 
 function articleMetaParts(article = {}, { includeAuthor = false } = {}) {
@@ -369,6 +486,10 @@ async function fetchJson(url, options) {
   return data;
 }
 
+function collectionItems(data) {
+  return Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+}
+
 function adminLoginErrorMessage(error = {}) {
   const message = String(error.message || "");
   if (!message || message === "Failed to fetch") return "Cannot connect to backend";
@@ -563,6 +684,7 @@ function setPageMeta({ title = "Tom/Art", description = "Tomujin Article", image
 
 function goHome({ pushUrl = true } = {}) {
   state.activeCategory = "";
+  state.activeMainSection = "";
   state.activeYear = "";
   state.activeAuthor = "";
   state.activeContentType = "";
@@ -1313,9 +1435,11 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     try {
       const params = new URLSearchParams();
       if (state.adminStatusFilter) params.set("status", state.adminStatusFilter);
-      state.adminArticles = await fetchJson(`/api/admin/articles${params.toString() ? `?${params.toString()}` : ""}`, { headers: adminHeaders() });
+      params.set("page", "1");
+      params.set("limit", "100");
+      state.adminArticles = collectionItems(await fetchJson(`/api/admin/articles${params.toString() ? `?${params.toString()}` : ""}`, { headers: adminHeaders() }));
       state.adminAllArticles = state.adminStatusFilter
-        ? await fetchJson("/api/admin/articles", { headers: adminHeaders() })
+        ? collectionItems(await fetchJson("/api/admin/articles?page=1&limit=100", { headers: adminHeaders() }))
         : state.adminArticles;
       renderAdminArticles();
       renderAdminHeroPreview();
@@ -1534,63 +1658,54 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
 }
 
 function renderCategories() {
-  const yearButtons = graduationYears
-    .map(
-      (year) => `
-        <button class="${state.activeYear === String(year) ? "is-active" : ""}" data-year="${year}" type="button" role="menuitem">
-          ${year}
-        </button>
-      `
-    )
-    .join("");
-
-  const categoryButtons = state.categories
-    .map((category) => {
-      const count = Number(category.articleCount || 0);
+  const menuCategoryButtons = writingMenuCategories
+    .map((menuCategory) => {
+      const category = liveCategoryForConfig(menuCategory);
+      const slug = category?.slug || menuCategory.slug;
+      const count = Number(category?.articleCount || 0);
 
       return `
-        <button class="${state.activeCategory === category.slug ? "is-active" : ""}" data-category="${category.slug}" type="button" role="menuitem" title="${escapeHtml(category.name)} ангиллыг харах">
-          ${escapeHtml(category.name)}
+        <button class="${state.activeCategory === slug ? "is-active" : ""}" data-category="${escapeHtml(slug)}" type="button" role="menuitem" title="${escapeHtml(menuCategory.label)}">
+          ${escapeHtml(menuCategory.label)}
           <small aria-label="${count} нийтлэл">${count}</small>
         </button>
       `;
     })
     .join("");
 
-  const activeCategory = state.categories.find((category) => category.slug === state.activeCategory);
-
+  const activeMenuCategory = writingMenuCategories.find((menuCategory) => {
+    return categoryConfigSlugs(menuCategory).includes(state.activeCategory) || state.activeCategory === publicCategorySlug(menuCategory);
+  });
   categoryNav.innerHTML = `
-    <button class="nav-home ${!state.activeYear && !state.activeCategory && state.view === "home" ? "is-active" : ""}" data-home-nav type="button">
+    <button class="nav-home ${!state.activeYear && !state.activeCategory && !state.activeMainSection && state.view === "home" ? "is-active" : ""}" data-home-nav type="button">
       Home
     </button>
-    <div class="nav-dropdown ${state.activeYear ? "is-active" : ""}">
-      <button class="year-toggle ${state.activeYear ? "is-active" : ""}" data-nav-toggle type="button" aria-haspopup="true" aria-expanded="false">
-        Он
-        ${state.activeYear ? `<small>${escapeHtml(state.activeYear)}</small>` : ""}
-        <span class="nav-chevron" aria-hidden="true">▾</span>
-      </button>
-      <div class="nav-menu year-menu" role="menu">
-        ${yearButtons}
-      </div>
-    </div>
-    <div class="nav-dropdown category-dropdown ${state.activeCategory ? "is-active" : ""}">
-      <button class="category-toggle ${state.activeCategory ? "is-active" : ""}" data-nav-toggle type="button" aria-haspopup="true" aria-expanded="false">
-        Төрөл
-        ${activeCategory ? `<small>${escapeHtml(activeCategory.name)}</small>` : ""}
+    <div class="nav-dropdown category-dropdown ${state.activeCategory || state.activeMainSection === "writing" ? "is-active" : ""}">
+      <button class="category-toggle ${state.activeCategory || state.activeMainSection === "writing" ? "is-active" : ""}" data-nav-toggle type="button" aria-haspopup="true" aria-expanded="false">
+        Сурагчдын Бичвэр
+        ${activeMenuCategory ? `<small>${escapeHtml(activeMenuCategory.label)}</small>` : ""}
         <span class="nav-chevron" aria-hidden="true">▾</span>
       </button>
       <div class="nav-menu category-menu" role="menu">
-        ${categoryButtons}
+        <button class="${state.activeMainSection === "writing" && !state.activeCategory ? "is-active" : ""}" data-main-section="writing" type="button" role="menuitem">
+          Бүгд
+        </button>
+        ${menuCategoryButtons}
       </div>
     </div>
+    <button class="nav-section ${state.activeMainSection === "books" ? "is-active" : ""}" data-main-section="books" type="button">Ном</button>
+    <button class="nav-section ${state.activeMainSection === "notes" ? "is-active" : ""}" data-main-section="notes" type="button">Зурвас</button>
+    <button class="nav-section ${state.activeMainSection === "podcast" ? "is-active" : ""}" data-main-section="podcast" type="button">Подкаст</button>
   `;
 
   categoryNav.querySelector("[data-home-nav]")?.addEventListener("click", () => {
     state.activeYear = "";
     state.activeCategory = "";
+    state.activeMainSection = "";
     state.activePage = 1;
     state.query = "";
     if (headerSearchInput) headerSearchInput.value = "";
+    closeMobileHeaderPanels();
     goHome();
   });
 
@@ -1610,30 +1725,43 @@ function renderCategories() {
     });
   });
 
-  categoryNav.querySelectorAll("[data-year]").forEach((button) => {
+  categoryNav.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeYear = state.activeYear === button.dataset.year ? "" : button.dataset.year;
-      state.activeCategory = "";
+      state.activeCategory = state.activeCategory === button.dataset.category ? "" : button.dataset.category;
+      state.activeMainSection = "";
+      state.activeYear = "";
+      state.activeAuthor = "";
       state.activePage = 1;
       renderCategories();
       if (getArticleSlugFromPath()) {
         history.pushState({ view: "home" }, "", "/");
       }
+      closeMobileHeaderPanels();
       loadArticles({ scrollNews: true });
     });
   });
 
-  categoryNav.querySelectorAll("[data-category]").forEach((button) => {
+  categoryNav.querySelectorAll("[data-main-section]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeCategory = state.activeCategory === button.dataset.category ? "" : button.dataset.category;
       state.activeYear = "";
+      state.activeCategory = "";
+      state.activeAuthor = "";
+      state.activeMainSection = state.activeMainSection === button.dataset.mainSection ? "" : button.dataset.mainSection;
       state.activePage = 1;
       renderCategories();
       if (getArticleSlugFromPath()) {
         history.pushState({ view: "home" }, "", "/");
       }
+      closeMobileHeaderPanels();
       loadArticles({ scrollNews: true });
     });
+  });
+}
+
+function closeCategoryDropdowns() {
+  categoryNav?.querySelectorAll(".nav-dropdown.is-open").forEach((dropdown) => {
+    dropdown.classList.remove("is-open");
+    dropdown.querySelector("[data-nav-toggle]")?.setAttribute("aria-expanded", "false");
   });
 }
 async function loadCategories() {
@@ -1647,13 +1775,18 @@ async function loadArticles({ openSingle = false, scrollNews = false } = {}) {
   const params = new URLSearchParams();
   if (state.activeCategory) params.set("category", state.activeCategory);
   if (state.activeYear) params.set("year", state.activeYear);
+  if (state.activeAuthor) params.set("author", state.activeAuthor);
   if (state.query) params.set("q", state.query);
   renderArchiveFilters();
 
   setStatus("Нийтлэлүүдийг ачаалж байна...");
 
   try {
-    state.articles = await fetchJson(`/api/articles?${params.toString()}`);
+    params.set("page", "1");
+    params.set("limit", "50");
+    const loadedArticles = collectionItems(await fetchJson(`/api/articles?${params.toString()}`));
+    const activeSection = sectionConfig(state.activeMainSection);
+    state.articles = activeSection ? loadedArticles.filter((article) => articleMatchesSection(article, activeSection)) : loadedArticles;
     const totalPages = Math.max(1, Math.ceil(state.articles.length / articlesPerPage));
     state.activePage = Math.min(Math.max(1, state.activePage || 1), totalPages);
     setStatus(state.articles.length ? "" : "Нийтлэл олдсонгүй.");
@@ -1669,6 +1802,7 @@ async function loadArticles({ openSingle = false, scrollNews = false } = {}) {
       document.querySelector("#news").scrollIntoView({ behavior: "smooth", block: "start" });
     }
   } catch (error) {
+    console.error("Could not load articles:", error);
     setStatus(error.message || "Нийтлэлүүдийг ачаалж чадсангүй.");
     renderArticles();
   }
@@ -1684,7 +1818,8 @@ async function loadHeroArticles() {
     state.heroPreviousIndex = null;
     state.heroDirection = 0;
     renderHeroCarousel();
-  } catch {
+  } catch (error) {
+    console.error("Could not load featured articles:", error);
     state.heroArticles = [];
     state.heroPreviousIndex = null;
     state.heroDirection = 0;
@@ -1765,12 +1900,17 @@ function renderHeroCarousel() {
     .map(
       (article, articleIndex) => `
         <a class="${heroSlideClass(articleIndex, index, previousIndex, shouldAnimate)}" href="${articleUrl(article.slug)}" data-hero-slug="${escapeHtml(article.slug)}">
-          <img class="hero-image" src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" />
+          <div class="hero-media">
+            <img class="hero-image" src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" />
+          </div>
           <div class="hero-overlay">
             <span class="hero-kicker">${renderHeroLabel(article)}</span>
             <h1>${escapeHtml(article.title)}</h1>
             <p>${escapeHtml(article.excerpt)}</p>
-            <small class="hero-date">${escapeHtml(formatDate(article.publishedAt))}</small>
+            <div class="hero-meta">
+              <span>${escapeHtml(article.author || "Tom/Art")}</span>
+              <span>${escapeHtml(formatDate(article.publishedAt))}</span>
+            </div>
           </div>
         </a>
       `
@@ -1844,13 +1984,125 @@ function renderArticleRail() {
   });
 }
 
+function hasArchiveFilter() {
+  return Boolean(state.activeCategory || state.activeMainSection || state.activeYear || state.activeAuthor || state.query);
+}
+
+function renderPostCard(article, { className = "post-card", dataName = "slug" } = {}) {
+  return `
+    <a class="${className}" href="${articleUrl(article.slug)}" data-${dataName}="${escapeHtml(article.slug)}" aria-label="${escapeHtml(article.title)} унших">
+      <span class="post-thumb">
+        <img src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" loading="lazy" />
+      </span>
+      <div class="post-copy">
+        <span class="post-category">${escapeHtml(articleCategoryNames(article) || "Нийтлэл")}</span>
+        <h3>${escapeHtml(article.title)}</h3>
+        ${article.excerpt ? `<p>${escapeHtml(article.excerpt)}</p>` : ""}
+        <small>${escapeHtml(article.author || "Tom/Art")} · ${escapeHtml(formatDate(article.publishedAt))}</small>
+      </div>
+    </a>
+  `;
+}
+
+function bindArticleCardLinks(container = articleGrid, dataName = "slug") {
+  if (!container) return;
+  const datasetKey = dataName.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+
+  container.querySelectorAll("img").forEach((image) => {
+    image.addEventListener("error", () => {
+      image.src = fallbackImageUrl;
+    });
+  });
+
+  container.querySelectorAll(`[data-${dataName}]`).forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      openArticle(card.dataset[datasetKey], { pushUrl: true });
+    });
+  });
+}
+
+function openSectionArchive(sectionKey = "") {
+  state.activeYear = "";
+  state.activeCategory = "";
+  state.activeAuthor = "";
+  state.activeMainSection = sectionKey;
+  state.activePage = 1;
+  renderCategories();
+  closeMobileHeaderPanels();
+  loadArticles({ scrollNews: true });
+}
+
+function renderHomepageSections() {
+  if (!articleGrid) return;
+
+  articleGrid.classList.add("home-preview-sections");
+  articleGrid.classList.remove("category-card-grid");
+  if (articlePagination) articlePagination.innerHTML = "";
+
+  articleGrid.innerHTML = homepageSections
+    .map((section) => {
+      const articles = latestArticlesForSection(section, 5);
+      const [featuredArticle, ...smallArticles] = articles;
+
+      return `
+        <section class="home-category-section" data-home-section="${escapeHtml(section.key)}">
+          <div class="home-section-heading">
+            <div>
+              <span>${escapeHtml(section.description)}</span>
+              <h3>${escapeHtml(section.label)}</h3>
+            </div>
+            <button type="button" data-section-open="${escapeHtml(section.key)}">Цааш унших</button>
+          </div>
+          ${
+            featuredArticle
+              ? `
+                <div class="home-section-layout">
+                  ${renderPostCard(featuredArticle, { className: "home-feature-card", dataName: "home-slug" })}
+                  <div class="home-small-list">
+                    ${
+                      smallArticles.length
+                        ? smallArticles
+                            .map((article) => renderPostCard(article, { className: "home-small-card", dataName: "home-slug" }))
+                            .join("")
+                        : '<p class="home-empty-note">Энэ хэсэгт өөр нийтлэл хараахан алга.</p>'
+                    }
+                  </div>
+                </div>
+              `
+              : '<p class="home-empty-note">Энэ хэсэгт нийтлэл хараахан алга.</p>'
+          }
+        </section>
+      `;
+    })
+    .join("");
+
+  articleGrid.querySelectorAll("[data-section-open]").forEach((button) => {
+    button.addEventListener("click", () => openSectionArchive(button.dataset.sectionOpen));
+  });
+
+  bindArticleCardLinks(articleGrid, "home-slug");
+  renderArticleRail();
+}
+
 function renderArticles() {
   if (!articleGrid) return;
 
   if (!state.articles.length) {
     articleGrid.innerHTML = "";
+    articleGrid.classList.remove("home-preview-sections");
+    articleGrid.classList.add("category-card-grid");
     if (articlePagination) articlePagination.innerHTML = "";
     renderArticleRail();
+    return;
+  }
+
+  if (!hasArchiveFilter()) {
+    renderHomepageSections();
     return;
   }
 
@@ -1859,48 +2111,13 @@ function renderArticles() {
   const pageStart = (state.activePage - 1) * articlesPerPage;
   const pageArticles = state.articles.slice(pageStart, pageStart + articlesPerPage);
 
-  articleGrid.innerHTML = pageArticles
-    .map(
-      (article) => `
-        <a class="post-card" href="${articleUrl(article.slug)}" data-slug="${escapeHtml(article.slug)}" aria-label="${escapeHtml(article.title)} унших">
-          <div class="post-feed-head">
-            <div>
-              <strong>${escapeHtml(article.author || "Tomujin Article")}</strong>
-              <small>${escapeHtml(formatDate(article.publishedAt))} / ${escapeHtml(formatViews(article.viewCount))}</small>
-            </div>
-          </div>
-          <div class="post-feed-body">
-            <div class="post-copy">
-              <span class="post-category">${escapeHtml(articleCategoryNames(article) || "Нийтлэл")}</span>
-              <h3>${escapeHtml(article.title)}</h3>
-              <p class="post-excerpt">${escapeHtml(article.excerpt || "")}</p>
-            </div>
-            <img src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" loading="lazy" />
-          </div>
-        </a>
-      `
-    )
-    .join("");
+  articleGrid.classList.remove("home-preview-sections");
+  articleGrid.classList.add("category-card-grid");
+  articleGrid.innerHTML = pageArticles.map((article) => renderPostCard(article)).join("");
 
   renderArticlePagination(totalPages);
   renderArticleRail();
-
-  articleGrid.querySelectorAll("img").forEach((image) => {
-    image.addEventListener("error", () => {
-      image.src = fallbackImageUrl;
-    });
-  });
-
-  articleGrid.querySelectorAll("[data-slug]").forEach((card) => {
-    card.addEventListener("click", (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      openArticle(card.dataset.slug, { pushUrl: true });
-    });
-  });
+  bindArticleCardLinks(articleGrid);
 }
 
 function renderArticlePagination(totalPages) {
@@ -1947,8 +2164,13 @@ function renderArchiveFilters() {
   const filters = [
     state.query ? { label: `Search: ${state.query}`, clear: "query" } : null,
     state.activeYear ? { label: `Year: ${state.activeYear}`, clear: "year" } : null,
+    state.activeAuthor ? { label: `Author: ${state.activeAuthor}`, clear: "author" } : null,
+    state.activeMainSection ? {
+      label: sectionConfig(state.activeMainSection)?.label || state.activeMainSection,
+      clear: "main",
+    } : null,
     state.activeCategory ? {
-      label: `Category: ${state.categories.find((category) => category.slug === state.activeCategory)?.name || state.activeCategory}`,
+      label: publicCategoryLabel(state.activeCategory),
       clear: "category",
     } : null,
   ].filter(Boolean);
@@ -1965,6 +2187,8 @@ function renderArchiveFilters() {
         if (headerSearchInput) headerSearchInput.value = "";
       }
       if (button.dataset.clearFilter === "year") state.activeYear = "";
+      if (button.dataset.clearFilter === "author") state.activeAuthor = "";
+      if (button.dataset.clearFilter === "main") state.activeMainSection = "";
       if (button.dataset.clearFilter === "category") state.activeCategory = "";
       state.activePage = 1;
       renderCategories();
@@ -2012,15 +2236,36 @@ async function openArticle(slug, { pushUrl = false } = {}) {
     app.innerHTML = `
       <section class="article-detail">
         <div class="article-actions">
-          <button class="back-link" type="button" id="backToNews">Буцах</button>
+          <button class="back-link" type="button" id="backToNews">← Нүүр хуудас</button>
           <button class="delete-link ${state.isAdmin && canUseDangerousAdminActions() ? "" : "is-hidden"}" type="button" id="deleteArticle">Устгах</button>
         </div>
         <div class="detail-layout">
           <article class="detail-copy">
-            ${detailMetaParts.length ? `<p class="detail-meta">${detailMetaParts.map(escapeHtml).join(" / ")}</p>` : ""}
-            <h1>${escapeHtml(article.title)}</h1>
-            <p class="excerpt">${escapeHtml(article.excerpt)}</p>
-            ${renderParagraphs(article.body)}
+            <header class="detail-header">
+              ${articleCategoryNames(article) ? `<p class="detail-kicker">${escapeHtml(articleCategoryNames(article))}</p>` : ""}
+              <h1>${escapeHtml(article.title)}</h1>
+              <p class="excerpt">${escapeHtml(article.excerpt)}</p>
+              <div class="detail-byline">
+                <a href="${alumniUrl(articlePrimaryYear(article), articleAuthorSlug(article))}" data-author-link>
+                  <span class="author-avatar">${escapeHtml((article.author || "T").slice(0, 1).toUpperCase())}</span>
+                  <strong>${escapeHtml(article.author || "Tom/Art")}</strong>
+                </a>
+                <span>${escapeHtml(formatDate(article.publishedAt))}</span>
+                ${articleYearText(article) ? `<span>${escapeHtml(articleYearText(article))}</span>` : ""}
+              </div>
+            </header>
+            <img class="detail-cover" src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" />
+            <div class="detail-body">
+              ${renderParagraphs(article.body)}
+            </div>
+            <aside class="detail-author-card">
+              <span class="author-avatar large">${escapeHtml((article.author || "T").slice(0, 1).toUpperCase())}</span>
+              <div>
+                <p>Written by</p>
+                <h2>${escapeHtml(article.author || "Tom/Art")}</h2>
+                ${detailMetaParts.length ? `<span>${detailMetaParts.map(escapeHtml).join(" · ")}</span>` : ""}
+              </div>
+            </aside>
           </article>
         </div>
       </section>
@@ -2035,6 +2280,18 @@ async function openArticle(slug, { pushUrl = false } = {}) {
 
     document.querySelector("#deleteArticle").addEventListener("click", () => {
       deleteArticle(article.slug, article.title);
+    });
+
+    document.querySelector("[data-author-link]")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      state.activeCategory = "";
+      state.activeMainSection = "";
+      state.activeYear = articlePrimaryYear(article);
+      state.activeAuthor = articleAuthorSlug(article);
+      history.pushState({ view: "home" }, "", "/");
+      mountHome();
+      renderCategories();
+      loadArticles({ scrollNews: true });
     });
 
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2061,6 +2318,7 @@ async function deleteArticle(slug, title, { askConfirm = true } = {}) {
     });
 
     state.activeCategory = "";
+    state.activeMainSection = "";
     state.activeYear = "";
     state.query = "";
     headerSearchInput.value = "";
@@ -2083,7 +2341,12 @@ async function deleteArticle(slug, title, { askConfirm = true } = {}) {
 headerSearchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   state.query = headerSearchInput.value.trim();
+  state.activeCategory = "";
+  state.activeMainSection = "";
+  state.activeYear = "";
+  state.activeAuthor = "";
   state.activePage = 1;
+  closeMobileHeaderPanels();
   loadArticles({ openSingle: true, scrollNews: true });
 });
 
@@ -2099,9 +2362,36 @@ adminLogin?.addEventListener("click", () => {
 });
 
 themeToggle?.addEventListener("click", () => {
-  state.theme = state.theme === "light" ? "dark" : "light";
-  window.localStorage.setItem(themeStorageKey, state.theme);
-  applyTheme();
+  toggleThemeMode();
+});
+
+mobileThemeToggle?.addEventListener("click", () => {
+  toggleThemeMode();
+});
+
+mobileSearchToggle?.addEventListener("click", () => {
+  const willOpen = !document.body.classList.contains("mobile-search-open");
+  setMobilePanel("search", willOpen);
+  if (willOpen) {
+    window.setTimeout(() => headerSearchInput?.focus(), 80);
+  }
+});
+
+mobileMenuToggle?.addEventListener("click", () => {
+  setMobilePanel("menu", !document.body.classList.contains("mobile-menu-open"));
+});
+
+document.addEventListener("click", (event) => {
+  if (!categoryNav?.contains(event.target)) {
+    closeCategoryDropdowns();
+  }
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeCategoryDropdowns();
+    closeMobileHeaderPanels();
+  }
 });
 
 backTop.addEventListener("click", () => {

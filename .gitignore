@@ -6,3 +6,6 @@ npm-debug.log*
 .DS_Store
 server-*.log
 frontend/public/images/uploads/
+*.log
+.env.*
+!.env.example
