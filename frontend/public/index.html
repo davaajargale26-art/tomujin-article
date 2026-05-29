@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans:wght@400;500;600;700;800&family=Noto+Serif:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <link rel="stylesheet" href="/styles.css?v=20260520-v0-static-port" />
     <script src="/app.js?v=20260520-v0-static-port" defer></script>
   </head>
@@ -158,23 +159,12 @@
         </section>
 
         <section class="section" id="news">
-          <div class="section-heading">
-            <span>Latest writing</span>
-            <h2>Student publication archive</h2>
-          </div>
-
           <div class="archive-filters" id="archiveFilters"></div>
           <p class="status" id="status"></p>
           <div class="post-grid" id="articleGrid"></div>
           <nav class="post-pagination" id="articlePagination" aria-label="Article pages"></nav>
         </section>
 
-        <aside class="publication-rail" aria-label="Recent posts">
-          <div class="rail-heading">
-            <strong>Recent</strong>
-          </div>
-          <div class="rail-article-list" id="railArticleList"></div>
-        </aside>
       </main>
     </template>
 
@@ -198,8 +188,35 @@
             </div>
           </div>
 
+          <div class="admin-overview" id="adminOverview">
+            <article class="admin-stat-card">
+              <span>Total Articles</span>
+              <strong id="adminTotalArticles">0</strong>
+            </article>
+            <article class="admin-stat-card">
+              <span>Categories</span>
+              <strong id="adminTotalCategories">0</strong>
+            </article>
+            <article class="admin-stat-card">
+              <span>Subcategories</span>
+              <strong id="adminTotalSubcategories">0</strong>
+            </article>
+            <article class="admin-stat-card">
+              <span>Recommended Posts</span>
+              <strong id="adminTotalRecommended">0</strong>
+            </article>
+          </div>
+
+          <div class="admin-tabs" id="adminTabs" role="tablist" aria-label="Admin sections">
+            <button type="button" class="is-active" data-admin-tab="articles">Articles</button>
+            <button type="button" data-admin-tab="preview">Preview</button>
+            <button type="button" data-admin-tab="categories">Categories</button>
+            <button type="button" data-admin-tab="recommended">Recommended</button>
+            <button type="button" data-admin-tab="users">Users</button>
+          </div>
+
           <div class="admin-layout">
-            <form class="article-form admin-editor" id="adminArticleForm">
+            <form class="article-form admin-editor" id="adminArticleForm" data-admin-panel="articles">
               <input type="hidden" name="originalSlug" id="adminOriginalSlug" />
               <div class="admin-editor-title wide">
                 <strong>Article Editor</strong>
@@ -225,18 +242,7 @@
                 <legend>Category</legend>
                 <div class="choice-grid" id="adminArticleCategories"></div>
               </fieldset>
-              <fieldset class="choice-field wide">
-                <legend>Graduate Year</legend>
-                <div class="choice-grid compact" id="adminArticleYears"></div>
-              </fieldset>
-              <label class="wide">
-                Tags
-                <input name="tags" type="text" placeholder="education, career, essay" required />
-              </label>
-              <label>
-                Cover Image URL
-                <input name="imageUrl" type="text" placeholder="https://example.com/photo.jpg or /images/uploads/photo.webp" />
-              </label>
+              <input name="imageUrl" type="hidden" />
               <label class="admin-upload-field">
                 Upload image
                 <input id="adminImageFile" type="file" accept="image/avif,image/gif,image/jpeg,image/png,image/webp" />
@@ -253,17 +259,6 @@
               <label>
                 Featured order
                 <input name="featuredOrder" type="number" min="1" max="99" placeholder="1 to 4" />
-              </label>
-              <label>
-                Publish Date
-                <input name="publishedAt" type="datetime-local" required />
-              </label>
-              <label>
-                Status
-                <select name="status" required>
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                </select>
               </label>
               <label class="wide">
                 Excerpt
@@ -288,30 +283,8 @@
                 </div>
                 <label class="wide">
                   Bio
-                  <textarea name="authorBio" rows="3" placeholder="Short alumni bio"></textarea>
+                  <textarea name="authorBio" rows="3" placeholder="Short author bio"></textarea>
                 </label>
-                <label>
-                  University
-                  <input name="authorUniversity" type="text" placeholder="University name" />
-                </label>
-                <label>
-                  Major
-                  <input name="authorMajor" type="text" placeholder="Major or program" />
-                </label>
-                <label>
-                  Current Work
-                  <input name="authorCurrentWork" type="text" placeholder="Current role or work" />
-                </label>
-                <label class="wide">
-                  Social Links
-                  <textarea name="authorSocialLinks" rows="2" placeholder="One link per line"></textarea>
-                </label>
-              </div>
-              <div class="admin-audit wide">
-                <div class="admin-list-heading">
-                  <strong>Audit history</strong>
-                </div>
-                <div class="admin-audit-list" id="adminAuditList">Select an article to view history.</div>
               </div>
               <div class="form-actions">
                 <p id="adminFormStatus"></p>
@@ -325,74 +298,95 @@
               </div>
             </form>
 
-            <div class="admin-side">
-              <div class="admin-list-panel admin-preview-panel">
-                <div class="admin-list-heading">
-                  <strong>Preview</strong>
-                </div>
-                <div class="admin-hero-preview" id="adminHeroPreview"></div>
+            <div class="admin-list-panel admin-preview-panel" data-admin-panel="preview">
+              <div class="admin-list-heading">
+                <strong>Preview</strong>
               </div>
+              <div class="admin-hero-preview" id="adminHeroPreview"></div>
+            </div>
 
-              <div class="admin-list-panel admin-featured-panel">
-                <div class="admin-list-heading">
-                  <strong>Featured carousel</strong>
-                  <span class="featured-count" id="adminFeaturedCount">0 / 4</span>
-                </div>
-                <p class="status" id="adminFeaturedStatus"></p>
-                <div class="admin-featured-list" id="adminFeaturedList"></div>
+            <div class="admin-list-panel admin-featured-panel" data-admin-panel="recommended">
+              <div class="admin-list-heading">
+                <strong>Recommended Posts Manager</strong>
+                <span class="featured-count" id="adminFeaturedCount">0 / 4</span>
               </div>
+              <p class="status" id="adminFeaturedStatus"></p>
+              <div class="admin-featured-list" id="adminFeaturedList"></div>
+            </div>
 
-              <div class="admin-list-panel admin-category-panel" id="adminCategoryPanel">
-                <div class="admin-list-heading">
-                  <strong>Categories</strong>
-                </div>
-                <form class="admin-category-form" id="adminCategoryForm">
-                  <input type="hidden" name="originalSlug" />
-                  <input name="name" type="text" placeholder="Category name" required />
-                  <input name="slug" type="text" placeholder="category-slug" />
-                  <button type="submit">Save Category</button>
-                </form>
-                <p class="status" id="adminCategoryStatus"></p>
-                <div class="admin-category-list" id="adminCategoryList"></div>
+            <div class="admin-list-panel admin-category-panel" id="adminCategoryPanel" data-admin-panel="categories">
+              <div class="admin-list-heading">
+                <strong>Category Manager</strong>
               </div>
+              <form class="admin-category-form" id="adminCategoryForm">
+                <input type="hidden" name="originalSlug" />
+                <input name="name" type="text" placeholder="Category name" required />
+                <input name="slug" type="text" placeholder="category-slug" />
+                <input name="sortOrder" type="number" min="0" step="1" placeholder="Order" />
+                <label class="admin-inline-check">
+                  <input name="visibleInHeader" type="checkbox" checked />
+                  <span>Show in header</span>
+                </label>
+                <label class="admin-inline-check">
+                  <input name="visibleOnHomepage" type="checkbox" checked />
+                  <span>Show on homepage</span>
+                </label>
+                <button type="submit">Save Category</button>
+              </form>
+              <p class="status" id="adminCategoryStatus"></p>
+              <div class="admin-category-list" id="adminCategoryList"></div>
+            </div>
 
-              <div class="admin-list-panel admin-owner-panel is-hidden" id="adminOwnerPanel">
-                <div class="admin-list-heading">
-                  <strong>Manage Admins</strong>
-                </div>
-                <form class="admin-admin-form" id="adminAdminForm">
-                  <input name="name" type="text" placeholder="Name" required />
-                  <input name="email" type="email" placeholder="Email" required />
-                  <input name="password" type="password" placeholder="Password" required />
-                  <select name="role" required>
-                    <option value="writer">writer</option>
-                    <option value="editor">editor</option>
-                    <option value="owner">owner</option>
-                  </select>
-                  <button type="submit">Add Admin</button>
-                </form>
-                <p class="status" id="adminAdminStatus"></p>
-                <div class="admin-admin-list" id="adminAdminList"></div>
+            <div class="admin-list-panel admin-owner-panel is-hidden" id="adminOwnerPanel" data-admin-panel="users">
+              <div class="admin-list-heading">
+                <strong>Users/Admin Manager</strong>
               </div>
+              <form class="admin-admin-form" id="adminAdminForm">
+                <input name="name" type="text" placeholder="Name" required />
+                <input name="email" type="email" placeholder="Email" required />
+                <span class="password-field">
+                  <input name="password" type="password" placeholder="Password" autocomplete="new-password" required />
+                  <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false" title="Show password">
+                    <svg class="password-eye" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M2.5 12s3.5-6 9.5-6s9.5 6 9.5 6s-3.5 6-9.5 6s-9.5-6-9.5-6Z" />
+                      <circle cx="12" cy="12" r="2.8" />
+                    </svg>
+                    <svg class="password-eye-off" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 5.2A9.9 9.9 0 0 1 12 5c6 0 9.5 7 9.5 7a17.8 17.8 0 0 1-2.2 3" />
+                      <path d="M6.5 6.8C3.9 8.5 2.5 12 2.5 12s3.5 7 9.5 7c1.6 0 3-.4 4.2-1" />
+                      <path d="M10.2 10.2a2.8 2.8 0 0 0 3.6 3.6" />
+                    </svg>
+                  </button>
+                </span>
+                <select name="role" required>
+                  <option value="writer">writer</option>
+                  <option value="editor">editor</option>
+                  <option value="owner">owner</option>
+                </select>
+                <button type="submit">Add Admin</button>
+              </form>
+              <p class="status" id="adminAdminStatus"></p>
+              <div class="admin-admin-list" id="adminAdminList"></div>
+            </div>
 
-              <div class="admin-list-panel">
-                <div class="admin-list-heading">
-                  <strong>Articles</strong>
-                  <button class="back-link" type="button" id="refreshAdminArticles">Refresh</button>
-                </div>
-                <div class="admin-list-search">
-                  <label for="adminArticleSearch">Find post</label>
-                  <input id="adminArticleSearch" type="search" autocomplete="off" placeholder="Search by title" />
-                </div>
-                <div class="admin-status-filter" id="adminStatusFilter">
-                  <button type="button" data-status-filter="" class="is-active">All</button>
-                  <button type="button" data-status-filter="draft">Draft</button>
-                  <button type="button" data-status-filter="published">Published</button>
-                  <button type="button" data-status-filter="archived">Archived</button>
-                </div>
-                <p class="status" id="adminListStatus"></p>
-                <div class="admin-article-list" id="adminArticleList"></div>
+            <div class="admin-list-panel admin-articles-panel" data-admin-panel="articles">
+              <div class="admin-list-heading">
+                <strong>Articles Manager</strong>
+                <button class="back-link" type="button" id="refreshAdminArticles">Refresh</button>
               </div>
+              <div class="admin-list-search">
+                <label for="adminArticleSearch">Find post</label>
+                <input id="adminArticleSearch" type="search" autocomplete="off" placeholder="Search by title" />
+              </div>
+              <div class="admin-status-filter" id="adminStatusFilter">
+                <button type="button" data-status-filter="" class="is-active">All</button>
+                <button type="button" data-status-filter="draft">Draft</button>
+                <button type="button" data-status-filter="published">Published</button>
+                <button type="button" data-status-filter="archived">Archived</button>
+              </div>
+              <p class="status" id="adminListStatus"></p>
+              <div class="admin-article-list" id="adminArticleList"></div>
             </div>
           </div>
         </div>
@@ -422,14 +416,28 @@
             </label>
             <label for="adminPassword">
               Password
-              <input
-                id="adminPassword"
-                name="password"
-                type="password"
-                autocomplete="current-password"
-                placeholder="Password"
-                required
-              />
+              <span class="password-field">
+                <input
+                  id="adminPassword"
+                  name="password"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="Password"
+                  required
+                />
+                <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" aria-pressed="false" title="Show password">
+                  <svg class="password-eye" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2.5 12s3.5-6 9.5-6s9.5 6 9.5 6s-3.5 6-9.5 6s-9.5-6-9.5-6Z" />
+                    <circle cx="12" cy="12" r="2.8" />
+                  </svg>
+                  <svg class="password-eye-off" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 3l18 18" />
+                    <path d="M10.6 5.2A9.9 9.9 0 0 1 12 5c6 0 9.5 7 9.5 7a17.8 17.8 0 0 1-2.2 3" />
+                    <path d="M6.5 6.8C3.9 8.5 2.5 12 2.5 12s3.5 7 9.5 7c1.6 0 3-.4 4.2-1" />
+                    <path d="M10.2 10.2a2.8 2.8 0 0 0 3.6 3.6" />
+                  </svg>
+                </button>
+              </span>
             </label>
             <div class="auth-actions">
               <p id="adminLoginStatus"></p>
@@ -447,7 +455,6 @@
         <section class="footer-column footer-about" aria-label="About Tomujin Article">
           <h2>Tom/Art</h2>
           <p>Thoughtful writing from Tomujin students. Essays, stories, reviews, interviews, notes, and publication experiments in one calm reading space.</p>
-          <a class="footer-admin-link" href="/admin">Admin</a>
         </section>
 
         <section class="footer-column" aria-label="About the publication">
@@ -458,9 +465,8 @@
         <nav class="footer-column footer-social" aria-label="Contact links">
           <h2>Contact</h2>
           <div class="footer-socials">
-            <a href="mailto:tomujinarticle@gmail.com" aria-label="Gmail">
-              <svg aria-hidden="true"><use href="#icon-outline-mail"></use></svg>
-              <span class="visually-hidden">tomujinarticle@gmail.com</span>
+            <a href="mailto:admissions@tomujin.edu.mn?subject=Contact from Tomujin Article">
+              <i class="fa-solid fa-envelope"></i>
             </a>
             <a href="tel:+97677773111" aria-label="Phone">
               <svg aria-hidden="true"><use href="#icon-outline-phone"></use></svg>

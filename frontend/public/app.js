@@ -1,11 +1,14 @@
+// Code map:
+// 1. Shared state, DOM handles, and formatting helpers.
+// 2. API helpers, admin session helpers, and permissions.
+// 3. Public/admin route mounting and dashboard bindings.
+// 4. Category, article, carousel, and detail rendering.
+// 5. Global event listeners and app startup.
 const state = {
   categories: [],
   articles: [],
-  alumni: [],
-  contentTypes: [],
   activeCategory: "",
   activeMainSection: "",
-  activeYear: "",
   activeAuthor: "",
   activeContentType: "",
   editorPickOnly: false,
@@ -15,6 +18,7 @@ const state = {
   view: "home",
   adminStatusFilter: "",
   adminAllArticles: [],
+  adminImageUploading: false,
 };
 
 const app = document.querySelector("#app");
@@ -29,7 +33,7 @@ const mobileSearchToggle = document.querySelector("#mobileSearchToggle");
 const mobileThemeToggle = document.querySelector("#mobileThemeToggle");
 const mobileMenuToggle = document.querySelector("#mobileMenuToggle");
 const homeButton = document.querySelector("#homeButton");
-const adminLogin = document.querySelector("#adminLogin");
+const brandLink = document.querySelector(".brand");
 const backTop = document.querySelector("#backTop");
 const adminNameStorageKey = "tomujinAdminName";
 const adminTokenStorageKey = "tomujinAdminToken";
@@ -37,54 +41,14 @@ const adminProfileStorageKey = "tomujinAdminProfile";
 const themeStorageKey = "tomujinTheme";
 const fallbackImageUrl = "/images/stagknight.jpg";
 const featuredLimit = 4;
-const graduationYears = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
-const approvedCategories = [
-  { label: "Өгүүллэг", slug: "oguulleg" },
-  { label: "Эссе", slug: "esse" },
-  { label: "Дурсамж", slug: "dursamj" },
-  { label: "Ярилцлага", slug: "yariltslaga" },
-  { label: "Яруу найраг", slug: "yaruu-nairag" },
-  { label: "Нийтлэл", slug: "niitlel" },
-  { label: "Шүүмж", slug: "shuumej" },
-  { label: "Ном", slug: "nom" },
-  { label: "Зурвас", slug: "zurvas" },
-  { label: "Подкаст", slug: "podcast" },
-];
-const approvedCategorySlugSet = new Set(approvedCategories.map((category) => category.slug));
-const legacyCategoryFallbackSlug = "niitlel";
-const writingMenuCategories = [
-  { label: "Өгүүллэг", slug: "oguulleg" },
-  { label: "Эссе", slug: "esse", names: ["Эсээ"] },
-  { label: "Дурсамж", slug: "dursamj" },
-  { label: "Ярилцлага", slug: "yariltslaga" },
-  { label: "Яруу найраг", slug: "yaruu-nairag" },
-  { label: "Нийтлэл", slug: "niitlel" },
-  { label: "Шүүмж", slug: "shuumej" },
-];
-const homepageSections = [
-  { key: "writing", label: "Сурагчдын Бичвэр", description: "Өгүүллэг, эссе, дурсамж, ярилцлага, яруу найраг, нийтлэл, шүүмж." },
-  { key: "books", label: "Ном", description: "Ном, уншлага, зохиолын тухай бичвэрүүд.", aliases: ["nom"], contentTypes: ["Book"] },
-  { key: "notes", label: "Зурвас", description: "Богино тэмдэглэл, бодол, сургуулийн амьдрал.", aliases: ["zurvas"], contentTypes: ["Record"] },
-  { key: "podcast", label: "Подкаст", description: "Яриа, сонсох хэлбэрийн нийтлэлүүд.", aliases: ["podcast"], contentTypes: ["Podcast", "Audio"] },
-];
-const defaultContentTypes = [
-  "Essay",
-  "Article",
-  "Record",
-  "Reflection",
-  "Interview",
-  "Research",
-  "Project Showcase",
-  "Personal Story",
-  "Opinion",
-  "Guide",
-];
+const writingDropdownLabel = "Сурагчдын Бичвэр";
+const directHeaderCategorySlugs = new Set(["nom", "zurvas", "podcast"]);
+const homeCategoryAccentColors = ["#23c2bf", "#ffc800", "#5a2595", "#ff5b2e"];
 const maxImageUploadBytes = 3 * 1024 * 1024;
 const allowedImageExtensions = new Set(["avif", "gif", "jpeg", "jpg", "png", "webp"]);
 const articlesPerPage = 9;
 
 let articleGrid;
-let articleRailList;
 let articlePagination;
 let archiveFilters;
 let statusText;
@@ -98,7 +62,7 @@ state.admin = getStoredAdminProfile();
 state.adminName = state.admin.name || window.sessionStorage.getItem(adminNameStorageKey) || "admin";
 state.adminToken = window.sessionStorage.getItem(adminTokenStorageKey) || "";
 state.isAdmin = Boolean(state.adminToken);
-state.theme = window.localStorage.getItem(themeStorageKey) === "light" ? "light" : "dark";
+state.theme = window.localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light";
 
 function applyTheme() {
   document.body.dataset.theme = state.theme;
@@ -165,27 +129,12 @@ function articleCategoriesList(article = {}) {
   return article.category ? [article.category] : [];
 }
 
-function approvedCategoryForSlug(slug = "") {
-  const normalizedSlug = String(slug || "").trim();
-  return approvedCategories.find((category) => category.slug === normalizedSlug)
-    || approvedCategories.find((category) => category.slug === legacyCategoryFallbackSlug);
-}
-
-function normalizeVisibleCategory(category = {}) {
-  if (!category) return approvedCategoryForSlug(legacyCategoryFallbackSlug);
-  const slugMatch = approvedCategorySlugSet.has(category.slug) ? approvedCategoryForSlug(category.slug) : null;
-  const nameMatch = approvedCategories.find((item) => normalizedText(item.label) === normalizedText(category.name));
-  return slugMatch || nameMatch || approvedCategoryForSlug(legacyCategoryFallbackSlug);
-}
-
-function normalizeVisibleCategories(categories = []) {
-  const visible = categories.map(normalizeVisibleCategory);
-  return approvedCategories.filter((category) => visible.some((item) => item.slug === category.slug));
-}
-
 function articleCategoryNames(article = {}) {
-  return normalizeVisibleCategories(articleCategoriesList(article))
-    .map((category) => category?.label)
+  return articleCategoriesList(article)
+    .map((category) => {
+      const liveCategory = state.categories.find((item) => item.slug === category?.slug);
+      return liveCategory?.name || category?.name || category?.label || category?.slug;
+    })
     .filter(Boolean)
     .join(" / ");
 }
@@ -198,47 +147,11 @@ function articleCategorySlugs(article = {}) {
 }
 
 function articleVisibleCategorySlugs(article = {}) {
-  const categoryObjects = articleCategoriesList(article);
-  if (categoryObjects.length) {
-    return normalizeVisibleCategories(categoryObjects).map((category) => category.slug);
-  }
-
-  return [...new Set(articleCategorySlugs(article).map((slug) => approvedCategoryForSlug(slug).slug))];
-}
-
-function articleYearValues(article = {}) {
-  const years = Array.isArray(article.graduationYears) ? article.graduationYears : [];
-  return years.map((year) => Number(year)).filter((year) => graduationYears.includes(year));
-}
-
-function articleYearText(article = {}) {
-  return articleYearValues(article).join(", ");
-}
-
-function articleClassText(article = {}) {
-  const years = articleYearValues(article);
-  return years.length ? `Class of: ${years.join(", ")}` : "";
+  return [...new Set(articleCategorySlugs(article).map((slug) => String(slug || "").trim()).filter(Boolean))];
 }
 
 function articleContentType(article = {}) {
   return article.contentType || "Article";
-}
-
-function articleAuthorSlug(article = {}) {
-  return article.authorSlug || slugifyText(article.author || "alumni");
-}
-
-function articlePrimaryYear(article = {}) {
-  return articleYearValues(article)[0] || article.graduateYear || graduationYears[graduationYears.length - 1];
-}
-
-function alumniUrl(year, authorSlug) {
-  return `/alumni/${encodeURIComponent(year)}/${encodeURIComponent(authorSlug)}`;
-}
-
-function getAlumniPath() {
-  const match = window.location.pathname.match(/^\/alumni\/(\d{4})\/([^/]+)\/?$/);
-  return match ? { year: Number(match[1]), authorSlug: decodeURIComponent(match[2]) } : null;
 }
 
 function formatInputDate(value) {
@@ -260,69 +173,15 @@ function normalizedText(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 
-function categoryConfigSlugs(config = {}) {
-  return [config.slug, ...(config.aliases || [])].filter(Boolean);
-}
-
-function categoryConfigNames(config = {}) {
-  return [config.label, ...(config.names || [])].filter(Boolean).map(normalizedText);
-}
-
-function liveCategoryForConfig(config = {}) {
-  const slugs = categoryConfigSlugs(config);
-  const names = categoryConfigNames(config);
-
-  for (const name of names) {
-    const category = state.categories.find((item) => normalizedText(item.name) === name);
-    if (category) return category;
-  }
-
-  for (const slug of slugs) {
-    const category = state.categories.find((item) => item.slug === slug);
-    if (category) return category;
-  }
-
-  return null;
-}
-
-function publicCategorySlug(config = {}) {
-  return liveCategoryForConfig(config)?.slug || config.slug;
-}
-
 function publicCategoryLabel(slug = "") {
   const liveCategory = state.categories.find((category) => category.slug === slug);
   if (liveCategory?.name) return liveCategory.name;
-
-  const writingCategory = writingMenuCategories.find((config) => categoryConfigSlugs(config).includes(slug));
-  if (writingCategory) return writingCategory.label;
-
   return slug;
-}
-
-function sectionConfig(key = "") {
-  return homepageSections.find((section) => section.key === key);
-}
-
-function writingSectionSlugs() {
-  return Array.from(new Set(writingMenuCategories.flatMap((config) => categoryConfigSlugs(config).concat(publicCategorySlug(config)))));
-}
-
-function sectionSlugs(section = {}) {
-  if (section.key === "writing") return writingSectionSlugs();
-  return Array.from(new Set(section.aliases || []));
 }
 
 function articleMatchesSlugs(article = {}, slugs = []) {
   const articleSlugs = articleVisibleCategorySlugs(article);
   return articleSlugs.some((slug) => slugs.includes(slug));
-}
-
-function articleMatchesCategoryConfig(article = {}, config = {}) {
-  const slugs = Array.from(new Set(categoryConfigSlugs(config).concat(publicCategorySlug(config))));
-  if (articleMatchesSlugs(article, slugs)) return true;
-
-  const names = categoryConfigNames(config);
-  return articleCategoriesList(article).some((category) => names.includes(normalizedText(category?.name)));
 }
 
 function articleMatchesContentTypes(article = {}, contentTypes = []) {
@@ -332,9 +191,80 @@ function articleMatchesContentTypes(article = {}, contentTypes = []) {
 
 function articleMatchesSection(article = {}, section = {}) {
   if (!section) return false;
-  if (articleMatchesSlugs(article, sectionSlugs(section))) return true;
-  const contentTypes = section.contentTypes || [];
-  return articleMatchesContentTypes(article, contentTypes);
+  if (section.slug) return articleMatchesSlugs(article, categoryGroupSlugs(section));
+  const slugs = [section.slug, ...(section.aliases || [])].filter(Boolean);
+  if (slugs.length && articleMatchesSlugs(article, slugs)) return true;
+  return articleMatchesContentTypes(article, section.contentTypes || []);
+}
+
+function sectionConfig(key = "") {
+  return state.categories.find((category) => category.slug === key) || null;
+}
+
+function sortedCategories(categories = []) {
+  return [...categories].sort((left, right) =>
+    Number(left.sortOrder ?? left.sort_order ?? 0) - Number(right.sortOrder ?? right.sort_order ?? 0) ||
+    String(left.name || "").localeCompare(String(right.name || ""))
+  );
+}
+
+function publicCategoryGroups(categories = []) {
+  const groups = new Map();
+
+  sortedCategories(categories).forEach((category) => {
+    const key = normalizedText(category.name || category.slug);
+    if (!key) return;
+    const existing = groups.get(key);
+    if (!existing || Number(category.articleCount || 0) > Number(existing.articleCount || 0)) {
+      groups.set(key, category);
+    }
+  });
+
+  return sortedCategories([...groups.values()]);
+}
+
+function categoryGroupSlugs(category = {}) {
+  const nameKey = normalizedText(category.name || category.slug);
+  return state.categories
+    .filter((item) => item.slug === category.slug || normalizedText(item.name || item.slug) === nameKey)
+    .map((item) => item.slug)
+    .filter(Boolean);
+}
+
+function headerCategories() {
+  return publicCategoryGroups(state.categories.filter((category) => (
+    category.visibleInHeader !== false &&
+    (Number(category.articleCount || 0) > 0 || directHeaderCategorySlugs.has(category.slug))
+  )));
+}
+
+function headerWritingCategories() {
+  const categories = headerCategories();
+  const directCategories = categories.filter((category) => directHeaderCategorySlugs.has(category.slug));
+  const writingCategories = categories.filter((category) => !directHeaderCategorySlugs.has(category.slug));
+
+  if (writingCategories.length && directCategories.length) return writingCategories;
+  return categories.slice(0, Math.min(7, categories.length));
+}
+
+function headerDirectCategories() {
+  const categories = headerCategories();
+  const directCategories = categories.filter((category) => directHeaderCategorySlugs.has(category.slug));
+  if (directCategories.length) return directCategories;
+  return categories.slice(7, 10);
+}
+
+function homepageSectionCategories() {
+  const visibleCategories = publicCategoryGroups(state.categories.filter((category) => category.visibleOnHomepage !== false));
+  const parentIdsWithChildren = new Set(visibleCategories.map((category) => category.parentId).filter(Boolean));
+  return visibleCategories
+    .filter((category) => !parentIdsWithChildren.has(category.id))
+    .sort((left, right) => {
+      const leftIsPodcast = left.slug === "podcast" || normalizedText(left.name) === "подкаст";
+      const rightIsPodcast = right.slug === "podcast" || normalizedText(right.name) === "подкаст";
+      if (leftIsPodcast !== rightIsPodcast) return leftIsPodcast ? 1 : -1;
+      return 0;
+    });
 }
 
 function latestArticlesForSection(section = {}, limit = 5) {
@@ -355,13 +285,11 @@ function sectionArticles(section = {}, limit = 7) {
   return uniqueArticles(state.articles.filter((article) => articleMatchesSection(article, section))).slice(0, limit);
 }
 
-function articleMetaParts(article = {}, { includeAuthor = false } = {}) {
+function articleMetaParts(article = {}, { includeAuthor = false, includeCategory = false } = {}) {
   const parts = [
-    includeAuthor && article.author ? `Author: ${article.author}` : "",
-    articleClassText(article),
-    `Type: ${articleContentType(article)}`,
-    articleCategoryNames(article) ? `Category: ${articleCategoryNames(article)}` : "",
-    formatDate(article.publishedAt) ? `Published: ${formatDate(article.publishedAt)}` : "",
+    includeCategory ? articleCategoryNames(article) : "",
+    includeAuthor && article.author ? article.author : "",
+    formatDate(article.publishedAt) || "",
   ];
   return parts.filter(Boolean);
 }
@@ -484,36 +412,21 @@ function renderChoiceGroup(container, name, items, selectedValues = []) {
     .join("");
 }
 
-function renderContentTypeSelect(select, selectedValue = "Article") {
-  if (!select) return;
-  const contentTypes = state.contentTypes.length ? state.contentTypes : defaultContentTypes;
-  select.innerHTML = contentTypes
-    .map((type) => `<option value="${escapeHtml(type)}" ${type === selectedValue ? "selected" : ""}>${escapeHtml(type)}</option>`)
-    .join("");
-}
-
 function renderTaxonomyControls(categoryContainer, yearContainer, article = {}) {
   const selectedCategories = articleVisibleCategorySlugs(article);
-  const selectedYears = articleYearValues(article);
-  const currentYear = new Date().getFullYear();
-  const defaultYear = graduationYears.includes(currentYear) ? currentYear : graduationYears[graduationYears.length - 1];
   renderChoiceGroup(
     categoryContainer,
     "categorySlugs",
     state.categories.map((category) => ({ value: category.slug, label: category.name })),
     selectedCategories.length ? selectedCategories : [state.categories[0]?.slug].filter(Boolean)
   );
-  renderChoiceGroup(
-    yearContainer,
-    "graduationYears",
-    graduationYears.map((year) => ({ value: year, label: year })),
-    selectedYears.length ? selectedYears : [defaultYear]
-  );
 }
 
 function addTaxonomyPayload(payload, form) {
-  payload.categorySlugs = getCheckedValues(form, "categorySlugs").filter((slug) => approvedCategorySlugSet.has(slug));
-  payload.graduationYears = getCheckedValues(form, "graduationYears").map((year) => Number(year));
+  const categorySlugSet = new Set(state.categories.map((category) => category.slug));
+  payload.categorySlugs = getCheckedValues(form, "categorySlugs").filter((slug) => categorySlugSet.has(slug));
+  delete payload.graduationYears;
+  delete payload.graduationYear;
   delete payload.categorySlug;
   return payload;
 }
@@ -567,29 +480,42 @@ function adminLoginErrorMessage(error = {}) {
   return message;
 }
 
+function bindPasswordToggles(root = document) {
+  root.querySelectorAll("[data-password-toggle]").forEach((button) => {
+    const field = button.closest(".password-field");
+    const input = field?.querySelector("input");
+    if (!field || !input || button.dataset.bound === "true") return;
+
+    const syncToggle = () => {
+      const isVisible = input.type === "text";
+      field.classList.toggle("is-visible", isVisible);
+      button.setAttribute("aria-pressed", String(isVisible));
+      button.setAttribute("aria-label", isVisible ? "Hide password" : "Show password");
+      button.title = isVisible ? "Hide password" : "Show password";
+    };
+
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      input.type = input.type === "password" ? "text" : "password";
+      syncToggle();
+      input.focus();
+    });
+    syncToggle();
+  });
+}
+
 function setStatus(message = "") {
   if (statusText) {
     statusText.textContent = message;
   }
 }
 
-function updateAdminButton() {
-  if (!adminLogin) return;
-  adminLogin.classList.toggle("is-active", state.isAdmin);
-  adminLogin.textContent = state.isAdmin ? "A ✓" : "A";
-  adminLogin.title = state.isAdmin ? "Админ горимоос гарах" : "Админ нэвтрэх";
-}
-
-function parkAdminButton() {
-  if (!adminLogin || adminLogin.parentElement === document.body) return;
-  document.body.appendChild(adminLogin);
-}
-
-function placeHomeAdminButton() {
-  if (!adminLogin) return;
-  const homeSection = document.querySelector("#news");
-  if (!homeSection || adminLogin.parentElement === homeSection) return;
-  homeSection.appendChild(adminLogin);
+function updateAdminEntryLabel() {
+  const label = state.isAdmin ? "Open admin dashboard" : "Admin login";
+  if (brandLink) {
+    brandLink.title = label;
+    brandLink.setAttribute("aria-label", label);
+  }
 }
 
 function adminHeaders() {
@@ -683,12 +609,40 @@ function slugifyText(value = "") {
     .slice(0, 100);
 }
 
+function plainTextFromContent(value = "") {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = String(value || "").replace(/<\/?(p|br|div|li|h[1-6]|blockquote)[^>]*>/gi, " ");
+  return (wrapper.textContent || wrapper.innerText || String(value || ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function trimToSentenceBoundary(value = "", maxLength = 180) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  const slice = text.slice(0, maxLength).trim();
+  const boundary = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("!"), slice.lastIndexOf("?"));
+  if (boundary >= 60) return slice.slice(0, boundary + 1).trim();
+  return `${slice.replace(/[\s,;:.-]+$/, "")}...`;
+}
+
+function excerptFromBody(value = "", maxLength = 180) {
+  const text = plainTextFromContent(value);
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+  const firstSentences = sentences.slice(0, 2).join(" ").trim();
+  return trimToSentenceBoundary(firstSentences || text, maxLength);
+}
+
+function metaDescriptionFromText(value = "", fallback = "") {
+  return trimToSentenceBoundary(plainTextFromContent(value) || fallback, 155);
+}
+
 function setAdminSession(admin, token) {
   setAdminProfile(admin);
   state.adminToken = token;
   state.isAdmin = true;
   window.sessionStorage.setItem(adminTokenStorageKey, token);
-  updateAdminButton();
+  updateAdminEntryLabel();
 }
 
 function adminLogout() {
@@ -699,7 +653,7 @@ function adminLogout() {
   window.sessionStorage.removeItem(adminNameStorageKey);
   window.sessionStorage.removeItem(adminTokenStorageKey);
   window.sessionStorage.removeItem(adminProfileStorageKey);
-  updateAdminButton();
+  updateAdminEntryLabel();
 
   const slug = getArticleSlugFromPath();
   if (slug && state.view === "article") {
@@ -753,13 +707,13 @@ function setPageMeta({ title = "Tom/Art", description = "Tomujin Article", image
 function goHome({ pushUrl = true } = {}) {
   state.activeCategory = "";
   state.activeMainSection = "";
-  state.activeYear = "";
   state.activeAuthor = "";
   state.activeContentType = "";
   state.editorPickOnly = false;
   state.activePage = 1;
   state.query = "";
   headerSearchInput.value = "";
+  syncCategoryArchiveMode();
 
   if (pushUrl && window.location.pathname !== "/") {
     history.pushState({ view: "home" }, "", "/");
@@ -783,13 +737,12 @@ function getArticleSlugFromPath() {
 function mountHome() {
   state.view = "home";
   document.body.dataset.view = "home";
+  syncCategoryArchiveMode();
   window.clearInterval(heroTimer);
   setPageMeta();
-  parkAdminButton();
   app.innerHTML = homeTemplate.innerHTML;
 
   articleGrid = document.querySelector("#articleGrid");
-  articleRailList = document.querySelector("#railArticleList");
   articlePagination = document.querySelector("#articlePagination");
   archiveFilters = document.querySelector("#archiveFilters");
   statusText = document.querySelector("#status");
@@ -798,7 +751,6 @@ function mountHome() {
   heroPrev = document.querySelector("#heroPrev");
   heroNext = document.querySelector("#heroNext");
 
-  placeHomeAdminButton();
   renderArchiveFilters();
   bindContactScrollLinks();
   renderArticles();
@@ -809,7 +761,6 @@ function mountHome() {
 function openAdminLogin({ pushUrl = false } = {}) {
   state.view = "admin";
   document.body.dataset.view = "admin";
-  parkAdminButton();
   app.innerHTML = loginTemplate.innerHTML;
 
   if (pushUrl && !isAdminPath()) {
@@ -824,7 +775,13 @@ function openAdminLogin({ pushUrl = false } = {}) {
   const backButton = document.querySelector("#backFromLogin");
   const defaultSubmitText = submitButton.textContent;
 
+  bindPasswordToggles(app);
   window.setTimeout(() => emailInput.focus(), 80);
+
+  function setLoginStatus(message = "", tone = "") {
+    loginStatus.textContent = message;
+    loginStatus.dataset.tone = tone;
+  }
 
   backButton.addEventListener("click", () => {
     history.pushState({ view: "home" }, "", "/");
@@ -840,13 +797,13 @@ function openAdminLogin({ pushUrl = false } = {}) {
     const password = passwordInput.value;
 
     if (!email || !password) {
-      loginStatus.textContent = "Enter email and password.";
+      setLoginStatus("Enter email and password.", "error");
       return;
     }
 
     submitButton.disabled = true;
     submitButton.textContent = "Signing in...";
-    loginStatus.textContent = "Checking login...";
+    setLoginStatus("Checking login...");
 
     try {
       const result = await fetchJson("/api/admin/login", {
@@ -858,10 +815,10 @@ function openAdminLogin({ pushUrl = false } = {}) {
       });
 
       setAdminSession(result.admin || "admin", result.token);
-      loginStatus.textContent = "Signed in.";
+      setLoginStatus("Signed in.", "success");
       await openAdminDashboard({ pushUrl: true });
     } catch (error) {
-      loginStatus.textContent = adminLoginErrorMessage(error);
+      setLoginStatus(adminLoginErrorMessage(error), "error");
       passwordInput.select();
     } finally {
       submitButton.disabled = false;
@@ -887,7 +844,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   state.view = "admin-dashboard";
   document.body.dataset.view = "admin-dashboard";
   window.clearInterval(heroTimer);
-  parkAdminButton();
   if (!state.categories.length) {
     await loadCategories();
   }
@@ -899,7 +855,7 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
 
   const adminForm = document.querySelector("#adminArticleForm");
   const adminCategoryList = document.querySelector("#adminArticleCategories");
-  const adminYearList = document.querySelector("#adminArticleYears");
+  const adminYearList = null;
   const formStatusText = document.querySelector("#adminFormStatus");
   const listStatus = document.querySelector("#adminListStatus");
   const articleList = document.querySelector("#adminArticleList");
@@ -907,6 +863,10 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   const featuredStatus = document.querySelector("#adminFeaturedStatus");
   const featuredList = document.querySelector("#adminFeaturedList");
   const featuredCount = document.querySelector("#adminFeaturedCount");
+  const overviewTotalArticles = document.querySelector("#adminTotalArticles");
+  const overviewTotalCategories = document.querySelector("#adminTotalCategories");
+  const overviewTotalSubcategories = document.querySelector("#adminTotalSubcategories");
+  const overviewTotalRecommended = document.querySelector("#adminTotalRecommended");
   const draftButton = document.querySelector("#adminSaveDraft");
   const publishButton = document.querySelector("#adminPublishArticle");
   const archiveButton = document.querySelector("#adminArchiveArticle");
@@ -917,7 +877,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   const imageStatus = document.querySelector("#adminImageStatus");
   const imagePreview = document.querySelector("#adminImagePreview");
   const heroPreview = document.querySelector("#adminHeroPreview");
-  const auditList = document.querySelector("#adminAuditList");
   const statusFilter = document.querySelector("#adminStatusFilter");
   const adminIdentity = document.querySelector("#adminIdentity");
   const ownerPanel = document.querySelector("#adminOwnerPanel");
@@ -931,7 +890,13 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   const adminCategoryOriginalSlug = adminCategoryForm?.querySelector('[name="originalSlug"]');
   const adminCategoryNameInput = adminCategoryForm?.querySelector('[name="name"]');
   const adminCategorySlugInput = adminCategoryForm?.querySelector('[name="slug"]');
+  const adminCategorySortInput = adminCategoryForm?.querySelector('[name="sortOrder"]');
+  const adminCategoryHeaderInput = adminCategoryForm?.querySelector('[name="visibleInHeader"]');
+  const adminCategoryHomepageInput = adminCategoryForm?.querySelector('[name="visibleOnHomepage"]');
+  const adminTabs = document.querySelector("#adminTabs");
+  const adminPanels = [...document.querySelectorAll("[data-admin-panel]")];
 
+  bindPasswordToggles(app);
   setPageMeta({ title: "Admin Dashboard / Tomujin Article", description: "Tomujin Article admin dashboard" });
   renderTaxonomyControls(adminCategoryList, adminYearList);
 
@@ -940,6 +905,20 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     element.textContent = message;
     element.dataset.tone = tone;
   }
+
+  function setAdminTab(activeTab = "articles") {
+    adminTabs?.querySelectorAll("[data-admin-tab]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.adminTab === activeTab);
+      button.setAttribute("aria-selected", String(button.dataset.adminTab === activeTab));
+    });
+    adminPanels.forEach((panel) => {
+      panel.classList.toggle("admin-panel-hidden", panel.dataset.adminPanel !== activeTab);
+    });
+  }
+
+  adminTabs?.querySelectorAll("[data-admin-tab]").forEach((button) => {
+    button.addEventListener("click", () => setAdminTab(button.dataset.adminTab || "articles"));
+  });
 
   function renderAdminAccount() {
     const profile = normalizeAdminProfile(state.admin || {});
@@ -1043,11 +1022,20 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
           .map(
             (category) => `
               <article class="admin-category-row" data-category-slug="${escapeHtml(category.slug)}">
-                <div>
+                <div class="admin-category-copy">
                   <strong>${escapeHtml(category.name)}</strong>
-                  <small>${escapeHtml(category.slug)} / ${Number(category.articleCount || 0)} articles</small>
+                  <small>${escapeHtml(category.slug)}</small>
                 </div>
-                <button class="back-link" type="button" data-category-action="edit">Edit</button>
+                <div class="admin-category-metrics">
+                  <span><strong>${Number(category.articleCount || 0)}</strong> articles</span>
+                  <span><strong>${Number(category.subcategoryCount || 0)}</strong> subcategories</span>
+                  <span>${category.visibleInHeader === false ? "Hidden header" : "Header"}</span>
+                  <span>${category.visibleOnHomepage === false ? "Hidden homepage" : "Homepage"}</span>
+                </div>
+                <div class="admin-category-actions">
+                  <button class="back-link" type="button" data-category-action="edit">Edit</button>
+                  <button class="auth-secondary" type="button" data-category-action="delete">Delete</button>
+                </div>
               </article>
             `
           )
@@ -1061,11 +1049,41 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
         adminCategoryOriginalSlug.value = category.slug;
         adminCategoryNameInput.value = category.name;
         adminCategorySlugInput.value = category.slug;
+        if (adminCategorySortInput) adminCategorySortInput.value = Number(category.sortOrder || 0);
+        if (adminCategoryHeaderInput) adminCategoryHeaderInput.checked = category.visibleInHeader !== false;
+        if (adminCategoryHomepageInput) adminCategoryHomepageInput.checked = category.visibleOnHomepage !== false;
         adminCategorySlugInput.dataset.touched = "true";
         setAdminCategoryStatus(`Editing category: ${category.name}`);
         adminCategoryNameInput.focus();
       });
+      row.querySelector('[data-category-action="delete"]')?.addEventListener("click", async () => {
+        if (!category || !canManageCategories()) return;
+        if (!window.confirm(`Delete category "${category.name}"? Articles must be moved first.`)) return;
+        setAdminCategoryStatus("Deleting category...");
+        try {
+          await fetchJson(`/api/admin/categories/${encodeURIComponent(category.slug)}`, {
+            method: "DELETE",
+            headers: adminHeaders(),
+          });
+          setAdminCategoryStatus("Category deleted.", "success");
+          await refreshAdminCategories();
+          await loadAdminArticles();
+          await loadHeroArticles();
+        } catch (error) {
+          setAdminCategoryStatus(error.message || "Could not delete category.", "error");
+        }
+      });
     });
+    renderAdminOverview();
+  }
+
+  function renderAdminOverview() {
+    const articles = state.adminAllArticles?.length ? state.adminAllArticles : state.adminArticles || [];
+    const recommendedCount = getFeaturedArticles().length;
+    if (overviewTotalArticles) overviewTotalArticles.textContent = String(articles.length);
+    if (overviewTotalCategories) overviewTotalCategories.textContent = String(state.categories.length);
+    if (overviewTotalSubcategories) overviewTotalSubcategories.textContent = String(state.categories.filter((category) => category.parentId).length);
+    if (overviewTotalRecommended) overviewTotalRecommended.textContent = String(recommendedCount);
   }
 
   async function refreshAdminCategories() {
@@ -1122,8 +1140,83 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       .map((category) => ({ slug: category.slug, name: category.name }));
   }
 
-  function selectedAdminYears() {
-    return getCheckedValues(adminForm, "graduationYears").map((year) => Number(year));
+  function adminField(name = "") {
+    return adminForm.elements[name];
+  }
+
+  function fieldWasEdited(name = "") {
+    return adminField(name)?.dataset.userEdited === "true";
+  }
+
+  function markFieldEdited(name = "") {
+    const field = adminField(name);
+    if (!field) return;
+    field.dataset.userEdited = "true";
+    field.dataset.touched = "true";
+  }
+
+  function clearGeneratedFieldState() {
+    ["slug", "excerpt", "metaTitle", "metaDescription"].forEach((name) => {
+      const field = adminField(name);
+      if (!field) return;
+      delete field.dataset.userEdited;
+      delete field.dataset.touched;
+    });
+  }
+
+  function setAutoField(name = "", value = "") {
+    const field = adminField(name);
+    if (!field || fieldWasEdited(name)) return;
+    field.value = value;
+  }
+
+  function defaultAdminAuthorName() {
+    const profile = normalizeAdminProfile(state.admin || {});
+    return profile.name || profile.email || state.adminName || "admin";
+  }
+
+  function applyDefaultAuthor() {
+    if (!adminForm.author.value.trim()) {
+      adminForm.author.value = defaultAdminAuthorName();
+    }
+  }
+
+  function applyTitleAutofill() {
+    const title = adminForm.title.value.trim();
+    setAutoField("slug", slugifyText(title));
+    setAutoField("metaTitle", title);
+  }
+
+  function applyBodyAutofill() {
+    const body = adminForm.body.value;
+    const excerpt = excerptFromBody(body);
+    setAutoField("excerpt", excerpt);
+    setAutoField("metaDescription", metaDescriptionFromText(excerpt, body));
+  }
+
+  function ensureGeneratedPublishFields() {
+    applyDefaultAuthor();
+    applyTitleAutofill();
+    applyBodyAutofill();
+  }
+
+  function markLoadedGeneratedFieldState(article = {}) {
+    [
+      ["slug", article.slug],
+      ["excerpt", article.excerpt],
+      ["metaTitle", article.metaTitle],
+      ["metaDescription", article.metaDescription],
+    ].forEach(([name, value]) => {
+      const field = adminField(name);
+      if (!field) return;
+      if (String(value || "").trim()) {
+        field.dataset.userEdited = "true";
+        field.dataset.touched = "true";
+      } else {
+        delete field.dataset.userEdited;
+        delete field.dataset.touched;
+      }
+    });
   }
 
   function previewArticleFromForm() {
@@ -1131,8 +1224,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     const existing = (state.adminArticles || []).find((article) => article.slug === slug);
     const categories = selectedAdminCategories();
     const category = categories[0] || selectedAdminCategory();
-    const selectedYears = selectedAdminYears();
-
     return {
       title: adminForm.title.value.trim() || "Нийтлэлийн гарчиг",
       excerpt: adminForm.excerpt.value.trim() || "Товч тайлбар энд харагдана.",
@@ -1146,7 +1237,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       category,
       categories: categories.length ? categories : [category].filter((item) => item.slug),
       categorySlugs: categories.map((item) => item.slug),
-      graduationYears: selectedYears,
     };
   }
 
@@ -1156,7 +1246,7 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     const urlIsValid = isProbablyValidImageUrl(imageInput.value);
 
     if (imageStatus && imageInput.value.trim() && !urlIsValid) {
-      setPanelStatus(imageStatus, "Use http(s) or /images/... with jpg, png, webp, avif, or gif.", "error");
+      setPanelStatus(imageStatus, "Upload a jpg, png, webp, avif, or gif image.", "error");
     } else if (imageStatus && !imageFileInput?.files?.length) {
       setPanelStatus(imageStatus);
     }
@@ -1193,6 +1283,15 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   }
 
   function updateEditorActions(article = null) {
+    if (state.adminImageUploading) {
+      [draftButton, publishButton, archiveButton, restoreButton, newButton].filter(Boolean).forEach((button) => {
+        button.disabled = true;
+      });
+      adminForm.featured.disabled = true;
+      adminForm.featuredOrder.disabled = true;
+      return;
+    }
+
     const roleCanPublish = canPublishArchiveDelete();
     const isEditing = Boolean(adminForm.originalSlug.value);
     const status = article?.status || "draft";
@@ -1202,43 +1301,20 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     publishButton.disabled = !canEdit || !roleCanPublish;
     archiveButton.disabled = !isEditing || !roleCanPublish || status === "archived";
     restoreButton.disabled = !isEditing || !roleCanPublish || status !== "archived";
+    newButton.disabled = false;
     adminForm.featured.disabled = !canFeatureArticles() || status !== "published";
     adminForm.featuredOrder.disabled = adminForm.featured.disabled || !adminForm.featured.checked;
-  }
-
-  async function loadAuditHistory(slug) {
-    if (!auditList || !slug) return;
-    auditList.textContent = "Loading audit history...";
-
-    try {
-      const logs = await fetchJson(`/api/admin/articles/${encodeURIComponent(slug)}/audit`, { headers: adminHeaders() });
-      auditList.innerHTML = logs.length
-        ? logs
-            .map(
-              (log) => `
-                <div class="admin-audit-row">
-                  <strong>${escapeHtml(log.action)}</strong>
-                  <span>${escapeHtml(log.admin?.name || "admin")} / ${escapeHtml(log.admin?.role || "")}</span>
-                  <small>${escapeHtml(formatDate(log.createdAt))}</small>
-                </div>
-              `
-            )
-            .join("")
-        : "No audit history yet.";
-    } catch (error) {
-      auditList.textContent = error.message || "Could not load audit history.";
-    }
   }
 
   function resetAdminForm() {
     adminForm.reset();
     adminForm.originalSlug.value = "";
     adminForm.slug.value = "";
-    delete adminForm.slug.dataset.touched;
+    clearGeneratedFieldState();
+    applyDefaultAuthor();
     renderTaxonomyControls(adminCategoryList, adminYearList);
     setFormStatus();
     setPanelStatus(imageStatus);
-    if (auditList) auditList.textContent = "Select an article to view history.";
     renderAdminHeroPreview();
     updateEditorActions();
   }
@@ -1252,9 +1328,8 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
   function fillAdminForm(article) {
     adminForm.originalSlug.value = article.slug;
     adminForm.slug.value = article.slug;
-    adminForm.slug.dataset.touched = "true";
     adminForm.title.value = article.title;
-    adminForm.author.value = article.author;
+    adminForm.author.value = article.author || defaultAdminAuthorName();
     renderTaxonomyControls(adminCategoryList, adminYearList, article);
     adminForm.imageUrl.value = article.imageUrl || "";
     adminForm.featured.checked = isArticleFeatured(article);
@@ -1263,11 +1338,11 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     adminForm.metaTitle.value = article.metaTitle || "";
     adminForm.metaDescription.value = article.metaDescription || "";
     adminForm.body.value = article.body;
+    markLoadedGeneratedFieldState(article);
     setFormStatus(`Editing ${article.status || "draft"} article: ${article.title}`);
     setPanelStatus(imageStatus);
     renderAdminHeroPreview();
     updateEditorActions(article);
-    loadAuditHistory(article.slug);
     adminForm.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -1291,8 +1366,8 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     try {
       await patchArticleFeatured(slug, isFeatured, featuredOrder);
       await loadAdminArticles();
-      setFeaturedStatus(isFeatured ? "Featured carousel updated." : "Removed from featured carousel.", "success");
-      setFormStatus(isFeatured ? "Featured setting saved." : "Removed from featured carousel.", "success");
+      setFeaturedStatus(isFeatured ? "Featured posts updated." : "Removed from featured.", "success");
+      setFormStatus(isFeatured ? "Featured setting saved." : "Removed from featured.", "success");
       return true;
     } catch (error) {
       setFeaturedWarning(error.message || "Онцлох төлөвийг шинэчилж чадсангүй.");
@@ -1329,10 +1404,10 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
 
     featuredCount.textContent = `${featuredArticles.length} / ${featuredLimit}`;
     setFeaturedStatus(overLimit
-      ? `Онцлох нийтлэл ${featuredLimit}-өөс их байна. Илүүдлийг хасна уу.`
+      ? `Featured posts exceed ${featuredLimit}. Remove one first.`
       : featuredArticles.length
-        ? "Дээрээсээ дарааллаараа нүүр хуудасны Онцлох хэсэгт харагдана."
-        : "Онцлох нийтлэл сонгоогүй байна.",
+        ? "Shown in the hero slider by this order."
+        : "No featured posts selected.",
       overLimit ? "error" : ""
     );
 
@@ -1348,14 +1423,14 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
             </div>
             <div class="featured-admin-controls">
               <label class="feature-order-label">
-                Order
+                Featured order
                 <input class="feature-order-input" data-featured-action="order" type="number" min="1" max="99" value="${escapeHtml(article.featuredOrder || index + 1)}" aria-label="Featured order" />
               </label>
               <div class="feature-order-actions">
                 <button class="feature-order-button" type="button" data-featured-action="up" ${index === 0 ? "disabled" : ""}>Up</button>
                 <button class="feature-order-button" type="button" data-featured-action="down" ${index === featuredArticles.length - 1 ? "disabled" : ""}>Down</button>
               </div>
-              <button class="delete-link" type="button" data-featured-action="remove">Remove</button>
+              <button class="delete-link" type="button" data-featured-action="remove">Remove from featured</button>
             </div>
           </article>
         `
@@ -1407,7 +1482,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
             article.author,
             article.slug,
             articleCategoryNames(article),
-            articleYearText(article),
           ]
             .filter(Boolean)
             .join(" ")
@@ -1430,7 +1504,7 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     articleList.innerHTML = visibleArticles
       .map(
         (article) => `
-          <article class="admin-article-row" data-admin-slug="${escapeHtml(article.slug)}">
+          <article class="admin-article-row${article.deletedAt ? " is-deleted" : ""}" data-admin-slug="${escapeHtml(article.slug)}">
             <img src="${escapeHtml(articleImageUrl(article))}" alt="" loading="lazy" />
             <div>
               <span>${renderMetaLine(article, { includeAuthor: false })}</span>
@@ -1438,8 +1512,11 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
               <small>${escapeHtml(article.author)} / ${escapeHtml(article.status || "draft")}${article.deletedAt ? " / deleted" : ""}</small>
             </div>
             <div class="admin-row-controls">
-              <button class="feature-toggle-button" type="button" data-action="feature" ${(!canFeatureArticles() || article.status !== "published" || article.deletedAt || (limitReached && !isArticleFeatured(article))) ? "disabled" : ""}>${isArticleFeatured(article) ? "Remove Featured" : "Toggle Featured"}</button>
-              <input class="feature-order-input" data-action="order" type="number" min="1" max="99" value="${escapeHtml(article.featuredOrder || "")}" aria-label="Featured order" ${isArticleFeatured(article) && canFeatureArticles() ? "" : "disabled"} />
+              <button class="feature-toggle-button" type="button" data-action="feature" ${(!canFeatureArticles() || article.status !== "published" || article.deletedAt || (limitReached && !isArticleFeatured(article))) ? "disabled" : ""}>${isArticleFeatured(article) ? "Remove from featured" : "Feature"}</button>
+              <label class="feature-order-label admin-row-feature-order">
+                Featured order
+                <input class="feature-order-input" data-action="order" type="number" min="1" max="99" value="${escapeHtml(article.featuredOrder || "")}" aria-label="Featured order" ${isArticleFeatured(article) && canFeatureArticles() ? "" : "disabled"} />
+              </label>
               <button class="back-link" type="button" data-action="edit" ${canEditAdminArticle(article) ? "" : "disabled"}>Edit</button>
               ${showDangerousActions && article.status !== "published" ? '<button class="back-link" type="button" data-action="publish">Publish</button>' : ""}
               ${showDangerousActions && article.status !== "archived" ? '<button class="back-link" type="button" data-action="archive">Archive</button>' : ""}
@@ -1495,6 +1572,7 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     });
 
     renderAdminFeatured();
+    renderAdminOverview();
   }
 
   async function loadAdminArticles() {
@@ -1511,6 +1589,7 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
         : state.adminArticles;
       renderAdminArticles();
       renderAdminHeroPreview();
+      renderAdminOverview();
     } catch (error) {
       setListStatus(error.message || "Could not load articles.", "error");
     }
@@ -1518,14 +1597,19 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
 
   adminForm.addEventListener("input", renderAdminHeroPreview);
   adminForm.addEventListener("change", renderAdminHeroPreview);
+  ["slug", "excerpt", "metaTitle", "metaDescription"].forEach((name) => {
+    adminField(name)?.addEventListener("input", () => markFieldEdited(name));
+  });
   adminForm.title.addEventListener("input", () => {
-    if (!adminForm.originalSlug.value || !adminForm.slug.dataset.touched) {
-      adminForm.slug.value = slugifyText(adminForm.title.value);
-    }
+    applyTitleAutofill();
+    renderAdminHeroPreview();
   });
   adminForm.slug.addEventListener("input", () => {
-    adminForm.slug.dataset.touched = "true";
     adminForm.slug.value = slugifyText(adminForm.slug.value);
+  });
+  adminForm.body.addEventListener("input", () => {
+    applyBodyAutofill();
+    renderAdminHeroPreview();
   });
   articleSearchInput?.addEventListener("input", renderAdminArticles);
   statusFilter?.querySelectorAll("[data-status-filter]").forEach((button) => {
@@ -1552,7 +1636,9 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     const file = imageFileInput.files?.[0];
     if (!file) return;
 
+    state.adminImageUploading = true;
     imageFileInput.disabled = true;
+    updateEditorActions((state.adminArticles || []).find((article) => article.slug === adminForm.originalSlug.value));
     setPanelStatus(imageStatus, "Uploading image...");
 
     try {
@@ -1565,15 +1651,23 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       setPanelStatus(imageStatus, error.message || "Could not upload image.", "error");
       setFormStatus(error.message || "Could not upload image.", "error");
     } finally {
+      state.adminImageUploading = false;
       imageFileInput.disabled = false;
       imageFileInput.value = "";
+      updateEditorActions((state.adminArticles || []).find((article) => article.slug === adminForm.originalSlug.value));
     }
   });
 
   adminForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (state.adminImageUploading) {
+      setFormStatus("Wait for the image upload to finish before saving.", "error");
+      return;
+    }
+
     const submitter = event.submitter;
     const requestedStatus = submitter?.dataset.saveStatus || "draft";
+    ensureGeneratedPublishFields();
     const payload = Object.fromEntries(new FormData(adminForm).entries());
     addTaxonomyPayload(payload, adminForm);
     payload.isFeatured = adminForm.featured.checked;
@@ -1587,6 +1681,9 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
     }
     payload.slug = slugifyText(payload.slug || payload.title);
     const originalSlug = payload.originalSlug;
+    const existingArticle = originalSlug
+      ? [...(state.adminAllArticles || []), ...(state.adminArticles || [])].find((article) => article.slug === originalSlug)
+      : null;
     delete payload.originalSlug;
 
     if (!payload.slug) {
@@ -1604,8 +1701,15 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       return;
     }
 
-    if (payload.imageUrl) {
-      payload.imageUrl = payload.imageUrl.trim();
+    payload.imageUrl = (payload.imageUrl || "").trim();
+    payload.author = payload.author?.trim() || defaultAdminAuthorName();
+    payload.metaTitle = payload.metaTitle?.trim() || (fieldWasEdited("metaTitle") ? "" : payload.title?.trim());
+    payload.metaDescription = payload.metaDescription?.trim() || (fieldWasEdited("metaDescription") ? "" : metaDescriptionFromText(payload.excerpt, payload.body));
+    delete payload.tags;
+    if (existingArticle?.publishedAt) {
+      payload.publishedAt = existingArticle.publishedAt;
+    } else if (requestedStatus === "published") {
+      payload.publishedAt = new Date().toISOString();
     }
 
     const actionButtons = [draftButton, publishButton, archiveButton, restoreButton, newButton].filter(Boolean);
@@ -1682,11 +1786,6 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       return;
     }
 
-    if (!approvedCategorySlugSet.has(slug) && !approvedCategories.some((category) => normalizedText(category.label) === normalizedText(name))) {
-      setAdminCategoryStatus("Only the approved Tom/Art categories can be saved.", "error");
-      return;
-    }
-
     submitButton.disabled = true;
     setAdminCategoryStatus(originalSlug ? "Saving category..." : "Creating category...");
 
@@ -1694,9 +1793,17 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
       await fetchJson(originalSlug ? `/api/admin/categories/${encodeURIComponent(originalSlug)}` : "/api/admin/categories", {
         method: originalSlug ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json", ...adminHeaders() },
-        body: JSON.stringify({ name, slug }),
+        body: JSON.stringify({
+          name,
+          slug,
+          sortOrder: Number(adminCategorySortInput?.value || 0),
+          visibleInHeader: Boolean(adminCategoryHeaderInput?.checked),
+          visibleOnHomepage: Boolean(adminCategoryHomepageInput?.checked),
+        }),
       });
       adminCategoryForm.reset();
+      if (adminCategoryHeaderInput) adminCategoryHeaderInput.checked = true;
+      if (adminCategoryHomepageInput) adminCategoryHomepageInput.checked = true;
       delete adminCategorySlugInput.dataset.touched;
       setAdminCategoryStatus(originalSlug ? "Category updated." : "Category created.", "success");
       await refreshAdminCategories();
@@ -1726,53 +1833,50 @@ async function openAdminDashboard({ pushUrl = false } = {}) {
 
   resetAdminForm();
   renderAdminCategories();
+  setAdminTab("articles");
   await loadAdminUsers();
   await loadAdminArticles();
 }
 
 function renderCategories() {
-  const menuCategoryButtons = writingMenuCategories
-    .map((menuCategory) => {
-      const category = liveCategoryForConfig(menuCategory);
-      const slug = category?.slug || menuCategory.slug;
-      const count = Number(category?.articleCount || 0);
-
-      return `
-        <button class="${state.activeCategory === slug ? "is-active" : ""}" data-category="${escapeHtml(slug)}" type="button" role="menuitem" title="${escapeHtml(menuCategory.label)}">
-          ${escapeHtml(menuCategory.label)}
-          <small aria-label="${count} нийтлэл">${count}</small>
-        </button>
-      `;
-    })
+  syncCategoryArchiveMode();
+  const writingCategories = headerWritingCategories();
+  const directCategories = headerDirectCategories();
+  const menuCategoryButtons = writingCategories
+    .map((category) => `
+      <button class="${state.activeCategory === category.slug ? "is-active" : ""}" data-category="${escapeHtml(category.slug)}" type="button" role="menuitem" title="${escapeHtml(category.name)}">
+        ${escapeHtml(category.name)}
+        <small aria-label="${Number(category.articleCount || 0)} нийтлэл">${Number(category.articleCount || 0)}</small>
+      </button>
+    `)
+    .join("");
+  const directCategoryButtons = directCategories
+    .map((category) => `
+      <button class="nav-section ${state.activeCategory === category.slug ? "is-active" : ""}" data-category="${escapeHtml(category.slug)}" type="button">
+        ${escapeHtml(category.name)}
+      </button>
+    `)
     .join("");
 
-  const activeMenuCategory = writingMenuCategories.find((menuCategory) => {
-    return categoryConfigSlugs(menuCategory).includes(state.activeCategory) || state.activeCategory === publicCategorySlug(menuCategory);
-  });
+  const activeMenuCategory = writingCategories.find((category) => category.slug === state.activeCategory);
   categoryNav.innerHTML = `
-    <button class="nav-home ${!state.activeYear && !state.activeCategory && !state.activeMainSection && state.view === "home" ? "is-active" : ""}" data-home-nav type="button">
+    <button class="nav-home ${!state.activeCategory && !state.activeMainSection && state.view === "home" ? "is-active" : ""}" data-home-nav type="button">
       Home
     </button>
-    <div class="nav-dropdown category-dropdown ${state.activeCategory || state.activeMainSection === "writing" ? "is-active" : ""}">
-      <button class="category-toggle ${state.activeCategory || state.activeMainSection === "writing" ? "is-active" : ""}" data-nav-toggle type="button" aria-haspopup="true" aria-expanded="false">
-        Сурагчдын Бичвэр
-        ${activeMenuCategory ? `<small>${escapeHtml(activeMenuCategory.label)}</small>` : ""}
+    <div class="nav-dropdown category-dropdown ${activeMenuCategory ? "is-active" : ""}">
+      <button class="category-toggle ${activeMenuCategory ? "is-active" : ""}" data-nav-toggle type="button" aria-haspopup="true" aria-expanded="false">
+        ${escapeHtml(writingDropdownLabel)}
+        ${activeMenuCategory ? `<small>${escapeHtml(activeMenuCategory.name)}</small>` : ""}
         <span class="nav-chevron" aria-hidden="true">▾</span>
       </button>
       <div class="nav-menu category-menu" role="menu">
-        <button class="${state.activeMainSection === "writing" && !state.activeCategory ? "is-active" : ""}" data-main-section="writing" type="button" role="menuitem">
-          Бүгд
-        </button>
         ${menuCategoryButtons}
       </div>
     </div>
-    <button class="nav-section ${state.activeMainSection === "books" ? "is-active" : ""}" data-main-section="books" type="button">Ном</button>
-    <button class="nav-section ${state.activeMainSection === "notes" ? "is-active" : ""}" data-main-section="notes" type="button">Зурвас</button>
-    <button class="nav-section ${state.activeMainSection === "podcast" ? "is-active" : ""}" data-main-section="podcast" type="button">Подкаст</button>
+    ${directCategoryButtons}
   `;
 
   categoryNav.querySelector("[data-home-nav]")?.addEventListener("click", () => {
-    state.activeYear = "";
     state.activeCategory = "";
     state.activeMainSection = "";
     state.activePage = 1;
@@ -1800,26 +1904,9 @@ function renderCategories() {
 
   categoryNav.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.activeCategory = state.activeCategory === button.dataset.category ? "" : button.dataset.category;
+      state.activeCategory = button.dataset.category || "";
       state.activeMainSection = "";
-      state.activeYear = "";
       state.activeAuthor = "";
-      state.activePage = 1;
-      renderCategories();
-      if (getArticleSlugFromPath()) {
-        history.pushState({ view: "home" }, "", "/");
-      }
-      closeMobileHeaderPanels();
-      loadArticles({ scrollNews: true });
-    });
-  });
-
-  categoryNav.querySelectorAll("[data-main-section]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.activeYear = "";
-      state.activeCategory = "";
-      state.activeAuthor = "";
-      state.activeMainSection = state.activeMainSection === button.dataset.mainSection ? "" : button.dataset.mainSection;
       state.activePage = 1;
       renderCategories();
       if (getArticleSlugFromPath()) {
@@ -1839,26 +1926,32 @@ function closeCategoryDropdowns() {
 }
 async function loadCategories() {
   const loadedCategories = await fetchJson("/api/categories");
-  const countBySlug = new Map();
-  (Array.isArray(loadedCategories) ? loadedCategories : []).forEach((category) => {
-    const visibleCategory = normalizeVisibleCategory(category);
-    countBySlug.set(visibleCategory.slug, Number(countBySlug.get(visibleCategory.slug) || 0) + Number(category.articleCount || 0));
-  });
-  state.categories = approvedCategories.map((category, index) => ({
-    id: index + 1,
-    slug: category.slug,
-    name: category.label,
-    articleCount: countBySlug.get(category.slug) || 0,
-  }));
+  state.categories = sortedCategories((Array.isArray(loadedCategories) ? loadedCategories : [])
+    .map((category, index) => ({
+      id: category.id ?? index + 1,
+      slug: String(category.slug || "").trim(),
+      name: category.name || category.label || category.slug || "Category",
+      articleCount: Number(category.articleCount || 0),
+      subcategoryCount: Number(category.subcategoryCount || 0),
+      sortOrder: Number(category.sortOrder ?? category.sort_order ?? index + 1),
+      visibleInHeader: category.visibleInHeader === undefined && category.visible_in_header === undefined
+        ? true
+        : String(category.visibleInHeader ?? category.visible_in_header) !== "0" && category.visibleInHeader !== false,
+      visibleOnHomepage: category.visibleOnHomepage === undefined && category.visible_on_homepage === undefined
+        ? true
+        : String(category.visibleOnHomepage ?? category.visible_on_homepage) !== "0" && category.visibleOnHomepage !== false,
+      parentId: category.parentId ?? category.parent_id ?? null,
+    }))
+    .filter((category) => category.slug));
   renderCategories();
 }
 
 async function loadArticles({ openSingle = false, scrollNews = false } = {}) {
   if (state.view !== "home") mountHome();
+  syncCategoryArchiveMode();
 
   const params = new URLSearchParams();
   if (state.activeCategory) params.set("category", state.activeCategory);
-  if (state.activeYear) params.set("year", state.activeYear);
   if (state.activeAuthor) params.set("author", state.activeAuthor);
   if (state.query) params.set("q", state.query);
   renderArchiveFilters();
@@ -1881,7 +1974,6 @@ async function loadArticles({ openSingle = false, scrollNews = false } = {}) {
     }
 
     renderArticles();
-
     if (scrollNews) {
       document.querySelector("#news").scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -1992,7 +2084,6 @@ function renderHeroCarousel() {
             <h1>${escapeHtml(article.title)}</h1>
             <p>${escapeHtml(article.excerpt)}</p>
             <div class="hero-meta">
-              <span>${escapeHtml(article.author || "Tom/Art")}</span>
               <span>${escapeHtml(formatDate(article.publishedAt))}</span>
             </div>
           </div>
@@ -2041,38 +2132,15 @@ function renderHeroCarousel() {
   }
 }
 
-function renderArticleRail() {
-  if (!articleRailList) return;
-
-  const railArticles = state.articles.slice(0, 4);
-  articleRailList.innerHTML = railArticles.length
-    ? railArticles
-        .map(
-          (article) => `
-            <a class="rail-article" href="${articleUrl(article.slug)}" data-rail-slug="${escapeHtml(article.slug)}">
-              <span>${escapeHtml(articleCategoryNames(article) || "Нийтлэл")}</span>
-              <strong>${escapeHtml(article.title)}</strong>
-              <small>${escapeHtml(formatDate(article.publishedAt))}</small>
-            </a>
-          `
-        )
-        .join("")
-    : "";
-
-  articleRailList.querySelectorAll("[data-rail-slug]").forEach((link) => {
-    link.addEventListener("click", (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-      event.preventDefault();
-      openArticle(link.dataset.railSlug, { pushUrl: true });
-    });
-  });
-}
-
 function hasArchiveFilter() {
-  return Boolean(state.activeCategory || state.activeMainSection || state.activeYear || state.activeAuthor || state.query);
+  return Boolean(state.activeCategory || state.activeMainSection || state.activeAuthor || state.query);
 }
 
-function renderPostCard(article, { className = "post-card", dataName = "slug" } = {}) {
+function syncCategoryArchiveMode() {
+  document.body.classList.toggle("category-archive-active", Boolean(state.activeCategory));
+}
+
+function renderPostCard(article, { className = "post-card", dataName = "slug", showExcerpt = false } = {}) {
   return `
     <a class="${className}" href="${articleUrl(article.slug)}" data-${dataName}="${escapeHtml(article.slug)}" aria-label="${escapeHtml(article.title)} унших">
       <span class="post-thumb">
@@ -2081,7 +2149,7 @@ function renderPostCard(article, { className = "post-card", dataName = "slug" } 
       <div class="post-copy">
         <span class="post-category">${escapeHtml(articleCategoryNames(article) || "Нийтлэл")}</span>
         <h3>${escapeHtml(article.title)}</h3>
-        ${article.excerpt ? `<p>${escapeHtml(article.excerpt)}</p>` : ""}
+        ${showExcerpt && article.excerpt ? `<p>${escapeHtml(article.excerpt)}</p>` : ""}
         <small>${escapeHtml(article.author || "Tom/Art")} · ${escapeHtml(formatDate(article.publishedAt))}</small>
       </div>
     </a>
@@ -2100,10 +2168,7 @@ function bindArticleCardLinks(container = articleGrid, dataName = "slug") {
 
   container.querySelectorAll(`[data-${dataName}]`).forEach((card) => {
     card.addEventListener("click", (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
-        return;
-      }
-
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
       event.preventDefault();
       openArticle(card.dataset[datasetKey], { pushUrl: true });
     });
@@ -2111,10 +2176,9 @@ function bindArticleCardLinks(container = articleGrid, dataName = "slug") {
 }
 
 function openSectionArchive(sectionKey = "") {
-  state.activeYear = "";
-  state.activeCategory = "";
+  state.activeCategory = sectionKey;
   state.activeAuthor = "";
-  state.activeMainSection = sectionKey;
+  state.activeMainSection = "";
   state.activePage = 1;
   renderCategories();
   closeMobileHeaderPanels();
@@ -2122,7 +2186,6 @@ function openSectionArchive(sectionKey = "") {
 }
 
 function openCategoryArchive(categorySlug = "") {
-  state.activeYear = "";
   state.activeAuthor = "";
   state.activeMainSection = "";
   state.activeCategory = categorySlug;
@@ -2132,114 +2195,74 @@ function openCategoryArchive(categorySlug = "") {
   loadArticles({ scrollNews: true });
 }
 
-function renderHomeSectionFrame(section = {}, bodyHtml = "", { className = "" } = {}) {
+function renderHomeSectionFrame(section = {}, bodyHtml = "") {
+  if (!bodyHtml) return "";
+  const accentColor = section.accentColor || homeCategoryAccentColors[0];
+
   return `
-    <section class="home-category-section ${className}" data-home-section="${escapeHtml(section.key)}">
+    <section class="home-category-section" data-home-section="${escapeHtml(section.slug)}" style="--category-accent: ${escapeHtml(accentColor)}">
       <div class="home-section-heading">
-        <div>
-          <span>${escapeHtml(section.description)}</span>
-          <h3>${escapeHtml(section.label)}</h3>
-        </div>
-        <button type="button" data-section-open="${escapeHtml(section.key)}">Цааш унших</button>
+        <h3><span class="category-dot" aria-hidden="true"></span>${escapeHtml(section.label)}</h3>
+        ${section.hasMore ? `<button type="button" data-category-open="${escapeHtml(section.slug)}">Цааш унших</button>` : ""}
       </div>
-      ${bodyHtml || '<p class="home-empty-note">Энэ хэсэгт нийтлэл хараахан алга.</p>'}
+      ${bodyHtml}
     </section>
   `;
 }
 
-function renderWritingHomeSection(section = {}) {
-  const groupHtml = writingMenuCategories
-    .map((config) => {
-      const articles = uniqueArticles(state.articles.filter((article) => articleMatchesCategoryConfig(article, config))).slice(0, 4);
-      const categorySlug = publicCategorySlug(config);
-
-      if (!articles.length) {
-        return "";
-      }
-
-      return `
-        <section class="writing-subsection">
-          <div class="writing-subsection-heading">
-            <div>
-              <span>Сурагчдын Бичвэр</span>
-              <h4>${escapeHtml(config.label)}</h4>
-            </div>
-            <button type="button" data-category-open="${escapeHtml(categorySlug)}">Цааш унших</button>
-          </div>
-          <div class="writing-card-grid">
-            ${articles.map((article, index) => renderPostCard(article, {
-              className: index === 0 ? "home-small-card writing-lead-card" : "home-small-card",
-              dataName: "home-slug",
-            })).join("")}
-          </div>
-        </section>
-      `;
-    })
-    .join("");
-
-  return renderHomeSectionFrame(section, groupHtml || '<p class="home-empty-note">Сурагчдын бичвэр хэсэгт нийтлэл хараахан алга.</p>', {
-    className: "writing-home-section",
-  });
+function homepageArticlesForCategory(section = {}) {
+  const slugs = categoryGroupSlugs(section);
+  return uniqueArticles(state.articles.filter((article) => articleVisibleCategorySlugs(article).some((slug) => slugs.includes(slug))));
 }
 
-function renderStandardHomeSection(section = {}) {
-  const articles = sectionArticles(section, 7);
-  const [featuredArticle, ...smallArticles] = articles;
+function renderHomeSection(section = {}) {
+  const allArticles = homepageArticlesForCategory(section);
+  const articles = allArticles.slice(0, 2);
+  if (!articles.length) return "";
 
-  if (!featuredArticle) {
-    return renderHomeSectionFrame(section, '<p class="home-empty-note">Энэ хэсэгт нийтлэл хараахан алга.</p>');
-  }
-
-  return renderHomeSectionFrame(section, `
-    <div class="home-section-layout">
-      ${renderPostCard(featuredArticle, { className: "home-feature-card", dataName: "home-slug" })}
-      <div class="home-small-list">
-        ${
-          smallArticles.length
-            ? smallArticles
-                .map((article) => renderPostCard(article, { className: "home-small-card", dataName: "home-slug" }))
-                .join("")
-            : '<p class="home-empty-note">Энэ хэсэгт өөр нийтлэл хараахан алга.</p>'
-        }
-      </div>
+  return renderHomeSectionFrame({ ...section, hasMore: true }, `
+    <div class="home-category-posts">
+      ${articles.map((article) => renderPostCard(article, { className: "home-small-card", dataName: "home-slug" })).join("")}
     </div>
   `);
 }
 
-function renderHomeSection(section = {}) {
-  return section.key === "writing" ? renderWritingHomeSection(section) : renderStandardHomeSection(section);
-}
-
 function renderHomepageSections() {
   if (!articleGrid) return;
-
   articleGrid.classList.add("home-preview-sections");
   articleGrid.classList.remove("category-card-grid");
   if (articlePagination) articlePagination.innerHTML = "";
 
-  articleGrid.innerHTML = homepageSections.map((section) => renderHomeSection(section)).join("");
-
-  articleGrid.querySelectorAll("[data-section-open]").forEach((button) => {
-    button.addEventListener("click", () => openSectionArchive(button.dataset.sectionOpen));
-  });
+  const sectionCategories = homepageSectionCategories()
+    .filter((category) => homepageArticlesForCategory(category).length);
+  const categorySections = sectionCategories
+    .map((category, index) => renderHomeSection({
+      key: category.slug,
+      slug: category.slug,
+      label: category.name,
+      accentColor: homeCategoryAccentColors[Math.floor(index / 2) % homeCategoryAccentColors.length],
+    }))
+    .filter(Boolean)
+    .join("");
+  articleGrid.innerHTML = `
+    <div class="home-category-mosaic">${categorySections}</div>
+  `;
 
   articleGrid.querySelectorAll("[data-category-open]").forEach((button) => {
     button.addEventListener("click", () => openCategoryArchive(button.dataset.categoryOpen));
   });
-
   bindArticleCardLinks(articleGrid, "home-slug");
-  renderArticleRail();
 }
 
 function renderArticles() {
   if (!articleGrid) return;
+  syncCategoryArchiveMode();
 
   if (!state.articles.length) {
     articleGrid.innerHTML = "";
     articleGrid.classList.remove("home-preview-sections");
     articleGrid.classList.add("category-card-grid");
     if (articlePagination) articlePagination.innerHTML = "";
-    renderArticleRail();
     return;
   }
 
@@ -2255,10 +2278,9 @@ function renderArticles() {
 
   articleGrid.classList.remove("home-preview-sections");
   articleGrid.classList.add("category-card-grid");
-  articleGrid.innerHTML = pageArticles.map((article) => renderPostCard(article)).join("");
+  articleGrid.innerHTML = pageArticles.map((article) => renderPostCard(article, { showExcerpt: true })).join("");
 
   renderArticlePagination(totalPages);
-  renderArticleRail();
   bindArticleCardLinks(articleGrid);
 }
 
@@ -2305,7 +2327,6 @@ function renderArchiveFilters() {
 
   const filters = [
     state.query ? { label: `Search: ${state.query}`, clear: "query" } : null,
-    state.activeYear ? { label: `Year: ${state.activeYear}`, clear: "year" } : null,
     state.activeAuthor ? { label: `Author: ${state.activeAuthor}`, clear: "author" } : null,
     state.activeMainSection ? {
       label: sectionConfig(state.activeMainSection)?.label || state.activeMainSection,
@@ -2328,7 +2349,6 @@ function renderArchiveFilters() {
         state.query = "";
         if (headerSearchInput) headerSearchInput.value = "";
       }
-      if (button.dataset.clearFilter === "year") state.activeYear = "";
       if (button.dataset.clearFilter === "author") state.activeAuthor = "";
       if (button.dataset.clearFilter === "main") state.activeMainSection = "";
       if (button.dataset.clearFilter === "category") state.activeCategory = "";
@@ -2356,7 +2376,6 @@ async function openArticle(slug, { pushUrl = false } = {}) {
     const article = await fetchJson(`/api/articles/${slug}`, state.adminToken ? { headers: adminHeaders() } : undefined);
     state.view = "article";
     document.body.dataset.view = "article";
-    parkAdminButton();
 
     if (pushUrl && window.location.pathname !== articleUrl(slug)) {
       history.pushState({ view: "article", slug }, "", articleUrl(slug));
@@ -2388,12 +2407,11 @@ async function openArticle(slug, { pushUrl = false } = {}) {
               <h1>${escapeHtml(article.title)}</h1>
               <p class="excerpt">${escapeHtml(article.excerpt)}</p>
               <div class="detail-byline">
-                <a href="${alumniUrl(articlePrimaryYear(article), articleAuthorSlug(article))}" data-author-link>
+                <span class="detail-author-inline">
                   <span class="author-avatar">${escapeHtml((article.author || "T").slice(0, 1).toUpperCase())}</span>
                   <strong>${escapeHtml(article.author || "Tom/Art")}</strong>
-                </a>
+                </span>
                 <span>${escapeHtml(formatDate(article.publishedAt))}</span>
-                ${articleYearText(article) ? `<span>${escapeHtml(articleYearText(article))}</span>` : ""}
               </div>
             </header>
             <img class="detail-cover" src="${escapeHtml(articleImageUrl(article))}" alt="${escapeHtml(article.title)}" />
@@ -2424,18 +2442,6 @@ async function openArticle(slug, { pushUrl = false } = {}) {
       deleteArticle(article.slug, article.title);
     });
 
-    document.querySelector("[data-author-link]")?.addEventListener("click", (event) => {
-      event.preventDefault();
-      state.activeCategory = "";
-      state.activeMainSection = "";
-      state.activeYear = articlePrimaryYear(article);
-      state.activeAuthor = articleAuthorSlug(article);
-      history.pushState({ view: "home" }, "", "/");
-      mountHome();
-      renderCategories();
-      loadArticles({ scrollNews: true });
-    });
-
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (error) {
     setStatus(error.message || "Нийтлэл нээж чадсангүй.");
@@ -2461,7 +2467,6 @@ async function deleteArticle(slug, title, { askConfirm = true } = {}) {
 
     state.activeCategory = "";
     state.activeMainSection = "";
-    state.activeYear = "";
     state.query = "";
     headerSearchInput.value = "";
     history.pushState({ view: "home" }, "", "/");
@@ -2485,7 +2490,6 @@ headerSearchForm.addEventListener("submit", (event) => {
   state.query = headerSearchInput.value.trim();
   state.activeCategory = "";
   state.activeMainSection = "";
-  state.activeYear = "";
   state.activeAuthor = "";
   state.activePage = 1;
   closeMobileHeaderPanels();
@@ -2494,14 +2498,19 @@ headerSearchForm.addEventListener("submit", (event) => {
 
 homeButton?.addEventListener("click", () => goHome());
 
-adminLogin?.addEventListener("click", () => {
+function openAdminFromLogo(event) {
+  event?.preventDefault();
+  closeMobileHeaderPanels();
+
   if (state.isAdmin) {
     openAdminDashboard({ pushUrl: true });
     return;
   }
 
   openAdminLogin({ pushUrl: true });
-});
+}
+
+brandLink?.addEventListener("click", openAdminFromLogo);
 
 themeToggle?.addEventListener("click", () => {
   toggleThemeMode();
@@ -2569,7 +2578,7 @@ window.addEventListener("popstate", () => {
 
 async function startApp() {
   applyTheme();
-  updateAdminButton();
+  updateAdminEntryLabel();
 
   if (isAdminPath() && !isAdminDashboardPath()) {
     openAdminLogin();

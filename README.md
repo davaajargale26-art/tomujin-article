@@ -17,12 +17,17 @@ News/article website with a static HTML/CSS/JavaScript frontend and a Node.js/Ex
 ## Project Structure
 
 ```text
+backend/                          Express backend package
 backend/index.js                  Express API, auth, MySQL, uploads, fallback store
 backend/.env.example              Safe environment template
+frontend/public/                  Static website served by the backend/Firebase Hosting
 frontend/public/index.html        Frontend templates
 frontend/public/app.js            Frontend behavior
 frontend/public/styles.css        Frontend styles
 frontend/public/images/           Public images
+functions/                        Firebase Functions package
+tools/ai-assistant.js             Local AI review helper used by npm run assistant
+logs/                             Local runtime logs and pid files
 ```
 
 ## Local Setup
@@ -67,6 +72,34 @@ DB_USER=root
 DB_PASSWORD=
 DB_NAME=loginapp
 ```
+
+For the AI assistant, set an OpenAI API key in your shell or add it to `.env` as `OPENAI_API_KEY`.
+
+## AI Assistant CLI
+
+A helper script is available at `tools/ai-assistant.js`.
+
+Usage:
+
+```powershell
+cd "C:\Users\erhemee\OneDrive\Desktop\news-site"
+setx OPENAI_API_KEY "your_api_key"
+npm run assistant -- --file frontend/public/app.js
+```
+
+Analyze the whole project frontend and backend:
+
+```powershell
+npm run assistant -- --all
+```
+
+Analyze only the backend folder:
+
+```powershell
+npm run assistant -- --backend
+```
+
+If you want a file-by-file backend review instead, use `--file` or `--dir backend`.
 
 ## Admin Login
 

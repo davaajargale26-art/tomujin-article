@@ -1,3 +1,9 @@
+// Code map:
+// 1. Environment, Express middleware, upload, and security setup.
+// 2. Normalizers, validators, auth helpers, and role permissions.
+// 3. In-memory fallback store for local/demo operation.
+// 4. MySQL migrations, database queries, and API route handlers.
+// 5. Static frontend fallback and server startup.
 const express = require("express");
 const mysql = require("mysql2/promise");
 const cors = require("cors");
@@ -48,7 +54,7 @@ const publicPath = path.join(__dirname, "..", "frontend", "public");
 const publicImagesPath = path.join(publicPath, "images");
 const uploadImagesPath = path.join(publicImagesPath, "uploads");
 const fallbackImageUrl = "/images/stagknight.jpg";
-const jwtSecret = process.env.JWT_SECRET 
+const jwtSecret = process.env.JWT_SECRET;
 const adminSessionTtl = process.env.ADMIN_SESSION_TTL || "6h";
 const cloudinaryConfig = {
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -228,9 +234,9 @@ function asPublicImageUrl(value) {
   return value || fallbackImageUrl;
 }
 
-const approvedCategoryDefinitions = [
+const defaultCategoryDefinitions = [
   ["oguulleg", "Өгүүллэг"],
-  ["esse", "Эссе"],
+  ["esee", "Эсээ"],
   ["dursamj", "Дурсамж"],
   ["yariltslaga", "Ярилцлага"],
   ["yaruu-nairag", "Яруу найраг"],
@@ -240,25 +246,28 @@ const approvedCategoryDefinitions = [
   ["zurvas", "Зурвас"],
   ["podcast", "Подкаст"],
 ];
-const approvedCategoryBySlug = new Map(approvedCategoryDefinitions.map(([slug, name]) => [slug, { slug, name }]));
-const approvedCategoryByName = new Map(approvedCategoryDefinitions.map(([slug, name]) => [name.trim().toLowerCase(), { slug, name }]));
-const approvedCategorySlugs = new Set(approvedCategoryDefinitions.map(([slug]) => slug));
 const legacyCategoryFallbackSlug = "niitlel";
-
-function approvedCategoryForSlug(slug) {
-  const normalizedSlug = normalizeSlug(slug);
-  return approvedCategoryBySlug.get(normalizedSlug) || approvedCategoryBySlug.get(legacyCategoryFallbackSlug);
-}
-
-function approvedCategoryForPayload(payload = {}) {
-  const requestedSlug = normalizeSlug(payload.slug || payload.categorySlug || payload.value || "");
-  if (approvedCategoryBySlug.has(requestedSlug)) return approvedCategoryBySlug.get(requestedSlug);
-
-  const requestedName = String(payload.name || payload.label || "").trim().toLowerCase();
-  if (approvedCategoryByName.has(requestedName)) return approvedCategoryByName.get(requestedName);
-
-  throw createHttpError("Category must be one of the approved Tom/Art categories.", 400);
-}
+const legacyCategoryCleanupMappings = new Map([
+  ["updates", "niitlel"],
+  ["guides", "esee"],
+  ["culture", "yariltslaga"],
+  ["games", "niitlel"],
+]);
+const legacyCategoryCleanupSlugs = [
+  ...legacyCategoryCleanupMappings.keys(),
+  "psychology",
+  "school-life",
+  "science",
+  "self-development",
+  "social-issues",
+  "technology",
+  "tsa",
+  "tsen",
+  "university-life",
+  "yang",
+  "hudal",
+  "haha",
+];
 
 function normalizeFeaturedOrder(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -277,7 +286,6 @@ function normalizeCategorySlugs(payload = {}) {
     rawValues
       .map((value) => normalizeSlug(value))
       .filter(Boolean)
-      .map((slug) => (approvedCategorySlugs.has(slug) ? slug : legacyCategoryFallbackSlug))
       .slice(0, 8)
   )];
 }
@@ -362,6 +370,30 @@ function sanitizePlainText(value = "", maxLength = 220) {
   }).trim().slice(0, maxLength);
 }
 
+function plainTextFromArticleContent(value = "") {
+  const spaced = String(value || "").replace(/<\/?(p|br|div|li|h[1-6]|blockquote)[^>]*>/gi, " ");
+  return sanitizePlainText(spaced, 12000).replace(/\s+/g, " ").trim();
+}
+
+function trimToSentenceBoundary(value = "", maxLength = 180) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  const slice = text.slice(0, maxLength).trim();
+  const boundary = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("!"), slice.lastIndexOf("?"));
+  if (boundary >= 60) return slice.slice(0, boundary + 1).trim();
+  return `${slice.replace(/[\s,;:.-]+$/, "")}...`;
+}
+
+function generatedExcerptFromBody(value = "") {
+  const text = plainTextFromArticleContent(value);
+  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+  return trimToSentenceBoundary(sentences.slice(0, 2).join(" ").trim() || text, 180);
+}
+
+function generatedMetaDescription(body = "", excerpt = "") {
+  return trimToSentenceBoundary(plainTextFromArticleContent(excerpt) || plainTextFromArticleContent(body), 155);
+}
+
 function sanitizeArticleBody(value = "") {
   return sanitizeHtml(String(value || ""), {
     allowedTags: [
@@ -384,14 +416,8 @@ function isValidEmail(value = "") {
 
 function assertStrongPassword(password) {
   const value = String(password || "");
-  if (
-    value.length < 12 ||
-    !/[a-z]/.test(value) ||
-    !/[A-Z]/.test(value) ||
-    !/[0-9]/.test(value) ||
-    !/[^A-Za-z0-9]/.test(value)
-  ) {
-    throw createHttpError("Password must be at least 12 characters and include uppercase, lowercase, number, and symbol.");
+  if (value.length < 9) {
+    throw createHttpError("Password must be at least 9 characters.");
   }
 }
 
@@ -560,25 +586,74 @@ function normalizeTags(value) {
 }
 
 function normalizeCategoryPayload(payload = {}) {
-  const approvedCategory = approvedCategoryForPayload(payload);
-  const name = sanitizePlainText(approvedCategory.name, 140);
-  const slug = approvedCategory.slug;
+  const name = sanitizePlainText(payload.name || payload.label || "", 140);
+  const slug = normalizeSlug(payload.slug || payload.categorySlug || payload.value || name);
+  const sortOrder = Number.isFinite(Number(payload.sortOrder ?? payload.sort_order))
+    ? Number(payload.sortOrder ?? payload.sort_order)
+    : 0;
+  const visibleInHeader = payload.visibleInHeader === undefined && payload.visible_in_header === undefined
+    ? true
+    : isTruthy(payload.visibleInHeader ?? payload.visible_in_header);
+  const visibleOnHomepage = payload.visibleOnHomepage === undefined && payload.visible_on_homepage === undefined
+    ? true
+    : isTruthy(payload.visibleOnHomepage ?? payload.visible_on_homepage);
+  const parentIdValue = payload.parentId ?? payload.parent_id;
+  const parentId = parentIdValue === null || parentIdValue === undefined || parentIdValue === ""
+    ? null
+    : Number(parentIdValue);
 
   if (!name || !slug) {
     throw createHttpError("Category name and slug are required.");
   }
 
-  return { name, slug };
+  return {
+    name,
+    slug,
+    sortOrder: Number.isFinite(sortOrder) ? sortOrder : 0,
+    visibleInHeader,
+    visibleOnHomepage,
+    parentId: Number.isInteger(parentId) && parentId > 0 ? parentId : null,
+  };
+}
+
+function categoryResponse(row = {}) {
+  if (!row) return null;
+  return {
+    id: row.id || null,
+    slug: row.slug || "",
+    name: row.name || "",
+    sortOrder: Number(row.sortOrder ?? row.sort_order ?? 0),
+    visibleInHeader: row.visibleInHeader === undefined && row.visible_in_header === undefined
+      ? true
+      : Boolean(Number(row.visibleInHeader ?? row.visible_in_header)),
+    visibleOnHomepage: row.visibleOnHomepage === undefined && row.visible_on_homepage === undefined
+      ? true
+      : Boolean(Number(row.visibleOnHomepage ?? row.visible_on_homepage)),
+    parentId: row.parentId ?? row.parent_id ?? null,
+    articleCount: Number(row.articleCount ?? row.article_count ?? 0),
+    subcategoryCount: Number(row.subcategoryCount ?? row.subcategory_count ?? 0),
+  };
 }
 
 function normalizePublishedAt(value) {
-  if (!value) return new Date().toISOString();
+  const pad = (number) => String(number).padStart(2, "0");
+  const formatForMysql = (date) => [
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+  ].join("-") + " " + [
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+  ].join(":");
+
+  if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     throw createHttpError("Publish date must be valid.");
   }
 
-  return date.toISOString();
+  return formatForMysql(date);
 }
 
 function isOwner(admin = {}) {
@@ -619,6 +694,10 @@ function authorSlugFromName(value = "") {
   if (slug) return slug;
 
   return `alumni-${crypto.createHash("sha1").update(name || "author").digest("hex").slice(0, 8)}`;
+}
+
+function adminDisplayName(admin = {}) {
+  return sanitizePlainText(admin.name || admin.email || "", 140);
 }
 
 function primaryGraduationYear(article = {}) {
@@ -823,7 +902,7 @@ async function ensureConfiguredDbAdmin() {
   );
 }
 
-const seedCategories = approvedCategoryDefinitions;
+const seedCategories = defaultCategoryDefinitions;
 
 const graduationYearOptions = [2020, 2021, 2022, 2023, 2024, 2025, 2026];
 const defaultGraduationYear = 2026;
@@ -904,6 +983,10 @@ function initializeMemoryStore() {
     id: index + 1,
     slug,
     name,
+    sortOrder: index + 1,
+    visibleInHeader: true,
+    visibleOnHomepage: true,
+    parentId: null,
   }));
 
   const categoryIds = Object.fromEntries(memoryCategories.map((category) => [category.slug, category.id]));
@@ -955,17 +1038,11 @@ function mapMemoryArticle(article) {
   const rawCategorySlugs = article.category_slugs?.length
     ? article.category_slugs
     : [memoryCategories.find((item) => item.id === article.category_id)?.slug].filter(Boolean);
-  const categories = [...new Set(rawCategorySlugs.map((slug) => approvedCategoryForSlug(slug).slug))]
-    .map((slug) => {
-      const approvedCategory = approvedCategoryForSlug(slug);
-      const storedCategory = memoryCategories.find((item) => item.slug === approvedCategory.slug);
-      return {
-        id: storedCategory?.id || null,
-        slug: approvedCategory.slug,
-        name: approvedCategory.name,
-      };
-    });
-  const category = categories[0] || approvedCategoryForSlug(legacyCategoryFallbackSlug);
+  const categories = [...new Set(rawCategorySlugs)]
+    .map((slug) => memoryCategories.find((item) => item.slug === slug))
+    .filter(Boolean)
+    .map(categoryResponse);
+  const category = categories[0] || categoryResponse(memoryCategories[0]);
 
   return {
     id: article.id,
@@ -998,32 +1075,33 @@ function mapMemoryArticle(article) {
       : null,
     categories,
     categorySlugs: categories.map((item) => item.slug),
-    graduationYears: article.graduation_years?.length ? article.graduation_years : [defaultGraduationYear],
-    graduateYear: primaryGraduationYear(article),
   };
 }
 
 function getMemoryCategories() {
-  const counts = new Map(approvedCategoryDefinitions.map(([slug]) => [slug, 0]));
+  const counts = new Map(memoryCategories.map((category) => [category.slug, 0]));
   memoryArticles.forEach((article) => {
     if (article.status !== "published" || article.deleted_at) return;
     const rawCategorySlugs = article.category_slugs?.length
       ? article.category_slugs
       : [memoryCategories.find((item) => item.id === article.category_id)?.slug].filter(Boolean);
-    [...new Set(rawCategorySlugs.map((slug) => approvedCategoryForSlug(slug).slug))].forEach((slug) => {
+    [...new Set(rawCategorySlugs)].forEach((slug) => {
       counts.set(slug, Number(counts.get(slug) || 0) + 1);
     });
   });
 
-  return approvedCategoryDefinitions.map(([slug, name], index) => {
-    const storedCategory = memoryCategories.find((item) => item.slug === slug);
-    return {
-      id: storedCategory?.id || index + 1,
-      slug,
-      name,
-      articleCount: counts.get(slug) || 0,
-    };
+  const childCounts = new Map();
+  memoryCategories.forEach((category) => {
+    if (category.parentId) childCounts.set(category.parentId, Number(childCounts.get(category.parentId) || 0) + 1);
   });
+
+  return memoryCategories
+    .map((category) => ({
+      ...categoryResponse(category),
+      articleCount: counts.get(category.slug) || 0,
+      subcategoryCount: childCounts.get(category.id) || 0,
+    }))
+    .sort((left, right) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0) || left.name.localeCompare(right.name));
 }
 
 function createMemoryCategory(payload) {
@@ -1053,6 +1131,10 @@ function updateMemoryCategory(currentSlug, payload) {
   });
   existing.slug = category.slug;
   existing.name = category.name;
+  existing.sortOrder = category.sortOrder;
+  existing.visibleInHeader = category.visibleInHeader;
+  existing.visibleOnHomepage = category.visibleOnHomepage;
+  existing.parentId = category.parentId;
   return existing;
 }
 
@@ -1075,8 +1157,7 @@ function getMemoryArticles({ q = "", category = "", year = "", status = "", cont
         return false;
       }
       if (editorPick && !article.is_featured) return false;
-      const approvedCategorySlugsForArticle = [...new Set(categorySlugs.map((slug) => approvedCategoryForSlug(slug).slug))];
-      if (selectedCategory && selectedCategory !== "all" && !approvedCategorySlugsForArticle.includes(selectedCategory)) return false;
+      if (selectedCategory && selectedCategory !== "all" && !categorySlugs.includes(selectedCategory)) return false;
       if (selectedContentType && normalizeContentType(article.content_type) !== selectedContentType) return false;
       if (selectedAuthorSlug && (article.author_slug || authorSlugFromName(article.author)) !== selectedAuthorSlug) return false;
       if (graduationYearOptions.includes(selectedYear) && !(article.graduation_years || []).includes(selectedYear)) return false;
@@ -1216,26 +1297,31 @@ function setMemoryFeaturedPlacement(slug, featured, requestedOrder = null) {
   return mapMemoryArticle(article);
 }
 
-function validateArticlePayload(payload) {
+function validateArticlePayload(payload, admin = {}) {
   const categorySlugs = normalizeCategorySlugs(payload);
   const graduationYears = normalizeGraduationYears(payload.graduationYears || payload.graduationYear);
+  const title = sanitizePlainText(payload.title, 220);
+  const body = sanitizeArticleBody(payload.body);
+  const excerpt = sanitizePlainText(payload.excerpt || generatedExcerptFromBody(body), 900);
+  const author = sanitizePlainText(payload.author || adminDisplayName(admin), 140);
+  const status = normalizeArticleStatus(payload.status, "published");
   const article = {
     slug: normalizeSlug(payload.slug || payload.title),
-    title: sanitizePlainText(payload.title, 220),
-    excerpt: sanitizePlainText(payload.excerpt, 900),
-    body: sanitizeArticleBody(payload.body),
-    author: sanitizePlainText(payload.author, 140),
-    authorSlug: authorSlugFromName(payload.author),
+    title,
+    excerpt,
+    body,
+    author,
+    authorSlug: authorSlugFromName(author),
     contentType: normalizeContentType(payload.contentType),
     categorySlugs,
     categorySlug: categorySlugs[0] || "",
     graduationYears: graduationYears.length ? graduationYears : [defaultGraduationYear],
     tags: normalizeTags(payload.tags),
     imageUrl: normalizeImageUrl(payload.imageUrl),
-    status: normalizeArticleStatus(payload.status, "published"),
-    metaTitle: sanitizePlainText(payload.metaTitle, 220),
-    metaDescription: sanitizePlainText(payload.metaDescription, 320),
-    publishedAt: normalizePublishedAt(payload.publishedAt || payload.publishDate),
+    status,
+    metaTitle: sanitizePlainText(payload.metaTitle || title, 220),
+    metaDescription: sanitizePlainText(payload.metaDescription || generatedMetaDescription(body, excerpt), 320),
+    publishedAt: normalizePublishedAt(payload.publishedAt || payload.publishDate || (status === "published" ? new Date().toISOString() : "")),
     featured: isTruthy(payload.isFeatured) || isTruthy(payload.featured),
     featuredOrder: normalizeFeaturedOrder(payload.featuredOrder),
   };
@@ -1253,23 +1339,11 @@ function validateArticlePayload(payload) {
     throw error;
   }
 
-  if (!article.graduationYears.length) {
-    const error = new Error("Choose at least one graduation year.");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (article.status === "published" && !article.tags.length) {
-    const error = new Error("Published articles need at least one tag.");
-    error.statusCode = 400;
-    throw error;
-  }
-
   return article;
 }
 
 function createMemoryArticle(payload, admin) {
-  const payloadArticle = validateArticlePayload(payload);
+  const payloadArticle = validateArticlePayload(payload, admin);
   assertCanCreateArticle(admin, payloadArticle.status);
   const category = memoryCategories.find((item) => item.slug === payloadArticle.categorySlugs[0]);
 
@@ -1344,7 +1418,7 @@ function updateMemoryArticle(slug, payload, admin) {
   if (!existing) return null;
   assertCanEditArticle(admin, existing);
 
-  const payloadArticle = validateArticlePayload(payload);
+  const payloadArticle = validateArticlePayload(payload, admin);
   if (normalizeAdminRole(admin.role) === "writer" && payloadArticle.status !== "draft") {
     throw createHttpError("Writers can only save drafts.", 403);
   }
@@ -1391,11 +1465,11 @@ function updateMemoryArticle(slug, payload, admin) {
 }
 
 function setMemoryArticleStatus(slug, status, admin) {
-  assertCanChangeArticleLifecycle(admin);
   const article = memoryArticles.find((item) => item.slug === slug);
   if (!article) return null;
 
   const nextStatus = normalizeArticleStatus(status, article.status || "draft");
+  assertCanChangeArticleLifecycle(admin);
   if (nextStatus === "published" && (!String(article.excerpt || "").trim() || !String(article.body || "").trim())) {
     throw createHttpError("Published articles need an excerpt and body.");
   }
@@ -1403,6 +1477,9 @@ function setMemoryArticleStatus(slug, status, admin) {
   article.status = nextStatus;
   article.deleted_at = null;
   article.updated_by_admin_id = adminIdValue(admin);
+  if (nextStatus === "published" && !article.published_at) {
+    article.published_at = new Date().toISOString();
+  }
   if (nextStatus !== "published") {
     article.is_featured = 0;
     article.featured_order = null;
@@ -1553,6 +1630,64 @@ async function ensureDbIndexes() {
   );
 }
 
+async function cleanupLegacyDbCategories() {
+  const legacySlugs = [...new Set(legacyCategoryCleanupSlugs)];
+  if (!legacySlugs.length) return;
+
+  const [legacyRows] = await db.query(
+    `SELECT slug FROM news_categories WHERE slug IN (${legacySlugs.map(() => "?").join(", ")})`,
+    legacySlugs
+  );
+  if (!legacyRows.length) return;
+
+  await db.query(
+    "INSERT IGNORE INTO news_categories (slug, name, sort_order, visible_in_header, visible_on_homepage) VALUES ?",
+    [defaultCategoryDefinitions.map(([slug, name], index) => [slug, name, index + 1, 1, 1])]
+  );
+  await db.query("UPDATE news_categories SET name = ? WHERE slug = ?", ["Эсээ", "esee"]);
+  await db.query(
+    `UPDATE news_categories
+     SET sort_order = CASE slug
+       ${defaultCategoryDefinitions.map((_, index) => `WHEN ? THEN ${index + 1}`).join(" ")}
+       ELSE sort_order
+     END
+     WHERE sort_order = 0 AND slug IN (${defaultCategoryDefinitions.map(() => "?").join(", ")})`,
+    [...defaultCategoryDefinitions.map(([slug]) => slug), ...defaultCategoryDefinitions.map(([slug]) => slug)]
+  );
+
+  const mappedSlugs = [...legacyCategoryCleanupMappings.keys(), ...legacyCategoryCleanupMappings.values()];
+  const [categoryRows] = await db.query(
+    `SELECT id, slug FROM news_categories WHERE slug IN (${mappedSlugs.map(() => "?").join(", ")})`,
+    mappedSlugs
+  );
+  const categoryIdBySlug = new Map(categoryRows.map((row) => [row.slug, row.id]));
+
+  for (const [sourceSlug, targetSlug] of legacyCategoryCleanupMappings.entries()) {
+    const sourceId = categoryIdBySlug.get(sourceSlug);
+    const targetId = categoryIdBySlug.get(targetSlug);
+    if (!sourceId || !targetId || sourceId === targetId) continue;
+
+    await db.query("UPDATE news_articles SET category_id = ? WHERE category_id = ?", [targetId, sourceId]);
+    await db.query(
+      `INSERT IGNORE INTO news_article_categories (article_id, category_id)
+       SELECT article_id, ? FROM news_article_categories WHERE category_id = ?`,
+      [targetId, sourceId]
+    );
+    await db.query("DELETE FROM news_article_categories WHERE category_id = ?", [sourceId]);
+  }
+
+  await db.query(
+    `DELETE c
+     FROM news_categories c
+     LEFT JOIN news_articles a ON a.category_id = c.id
+     LEFT JOIN news_article_categories ac ON ac.category_id = c.id
+     WHERE c.slug IN (${legacySlugs.map(() => "?").join(", ")})
+       AND a.id IS NULL
+       AND ac.article_id IS NULL`,
+    legacySlugs
+  );
+}
+
 async function runDatabaseMigrations() {
   await ensureDatabase();
 
@@ -1561,6 +1696,10 @@ async function runDatabaseMigrations() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       slug VARCHAR(80) NOT NULL UNIQUE,
       name VARCHAR(140) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      visible_in_header TINYINT(1) NOT NULL DEFAULT 1,
+      visible_on_homepage TINYINT(1) NOT NULL DEFAULT 1,
+      parent_id INT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -1664,6 +1803,28 @@ async function runDatabaseMigrations() {
 
   await ensureConfiguredDbAdmin();
 
+  const [categoryColumns] = await db.query(
+    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'news_categories' AND COLUMN_NAME IN ('sort_order', 'visible_in_header', 'visible_on_homepage', 'parent_id')",
+    [dbName]
+  );
+  const categoryColumnNames = new Set(categoryColumns.map((column) => column.COLUMN_NAME));
+
+  if (!categoryColumnNames.has("sort_order")) {
+    await db.query("ALTER TABLE news_categories ADD COLUMN sort_order INT NOT NULL DEFAULT 0");
+  }
+
+  if (!categoryColumnNames.has("visible_in_header")) {
+    await db.query("ALTER TABLE news_categories ADD COLUMN visible_in_header TINYINT(1) NOT NULL DEFAULT 1");
+  }
+
+  if (!categoryColumnNames.has("visible_on_homepage")) {
+    await db.query("ALTER TABLE news_categories ADD COLUMN visible_on_homepage TINYINT(1) NOT NULL DEFAULT 1");
+  }
+
+  if (!categoryColumnNames.has("parent_id")) {
+    await db.query("ALTER TABLE news_categories ADD COLUMN parent_id INT NULL");
+  }
+
   const [articleColumns] = await db.query(
     "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'news_articles' AND COLUMN_NAME IN ('featured', 'is_featured', 'featured_order', 'view_count', 'status', 'deleted_at', 'meta_title', 'meta_description', 'created_by_admin_id', 'updated_by_admin_id', 'author_slug', 'content_type', 'tags', 'published_at')",
     [dbName]
@@ -1737,15 +1898,20 @@ async function runDatabaseMigrations() {
 
   await ensureDbIndexes();
 
-  await db.query(
-    "INSERT INTO news_categories (slug, name) VALUES ? ON DUPLICATE KEY UPDATE name = VALUES(name)",
-    [seedCategories]
-  );
+  const [categoryCountRows] = await db.query("SELECT COUNT(*) AS count FROM news_categories");
+  if (Number(categoryCountRows[0]?.count || 0) === 0) {
+    await db.query(
+      "INSERT INTO news_categories (slug, name, sort_order, visible_in_header, visible_on_homepage) VALUES ?",
+      [seedCategories.map(([slug, name], index) => [slug, name, index + 1, 1, 1])]
+    );
+  }
 
   const [categories] = await db.query("SELECT id, slug FROM news_categories");
   const categoryIds = Object.fromEntries(categories.map((category) => [category.slug, category.id]));
 
-  const articleRows = seedArticles.map((article) => [
+  const articleRows = seedArticles
+    .filter((article) => categoryIds[article.category])
+    .map((article) => [
     article.slug,
     categoryIds[article.category],
     article.title,
@@ -1761,14 +1927,16 @@ async function runDatabaseMigrations() {
     Number(article.viewCount || 0),
   ]);
 
-  await db.query(
-    `INSERT INTO news_articles
-      (slug, category_id, title, excerpt, body, author, author_slug, image_url, content_type, tags, is_featured, featured_order, view_count)
-     VALUES ?
-     ON DUPLICATE KEY UPDATE
-      slug = VALUES(slug)`,
-    [articleRows]
-  );
+  if (articleRows.length) {
+    await db.query(
+      `INSERT INTO news_articles
+        (slug, category_id, title, excerpt, body, author, author_slug, image_url, content_type, tags, is_featured, featured_order, view_count)
+       VALUES ?
+       ON DUPLICATE KEY UPDATE
+        slug = VALUES(slug)`,
+      [articleRows]
+    );
+  }
 
   await db.query(`
     INSERT IGNORE INTO news_article_categories (article_id, category_id)
@@ -1776,6 +1944,8 @@ async function runDatabaseMigrations() {
     FROM news_articles
     WHERE category_id IS NOT NULL
   `);
+
+  await cleanupLegacyDbCategories();
 
   await db.query(
     `
@@ -1800,8 +1970,19 @@ function mapArticle(row) {
     slug: row.category_slug,
     name: row.category_name,
   };
-  const categories = [...new Set(parseDbCategories(row.category_pairs, primaryCategory).map((category) => approvedCategoryForSlug(category.slug).slug))]
-    .map((slug) => approvedCategoryForSlug(slug));
+  const seenCategorySlugs = new Set();
+  const categories = parseDbCategories(row.category_pairs, primaryCategory)
+    .filter((category) => {
+      const slug = normalizeSlug(category.slug);
+      if (!slug || seenCategorySlugs.has(slug)) return false;
+      seenCategorySlugs.add(slug);
+      return true;
+    })
+    .map((category) => ({
+      id: category.id || null,
+      slug: normalizeSlug(category.slug),
+      name: category.name || category.slug,
+    }));
 
   return {
     id: row.id,
@@ -1825,11 +2006,9 @@ function mapArticle(row) {
     createdByAdminId: row.created_by_admin_id || null,
     updatedByAdminId: row.updated_by_admin_id || null,
     publishedAt: row.published_at,
-    category: categories[0] || approvedCategoryForSlug(legacyCategoryFallbackSlug),
+    category: categories[0] || null,
     categories,
     categorySlugs: categories.map((category) => category.slug),
-    graduationYears: parseDbGraduationYears(row.graduation_years),
-    graduateYear: primaryGraduationYear({ graduationYears: parseDbGraduationYears(row.graduation_years) }),
   };
 }
 
@@ -1887,30 +2066,6 @@ function categoryArticleFilterSql() {
       WHERE filter_ac.article_id = a.id AND filter_c.slug = ?
     )
   `;
-}
-
-function approvedCategoryArticleFilterSql(category) {
-  if (normalizeSlug(category) === legacyCategoryFallbackSlug) {
-    return `
-      EXISTS (
-        SELECT 1
-        FROM news_article_categories filter_ac
-        JOIN news_categories filter_c ON filter_c.id = filter_ac.category_id
-        WHERE filter_ac.article_id = a.id
-          AND (filter_c.slug = ? OR filter_c.slug NOT IN (${approvedCategoryDefinitions.map(() => "?").join(", ")}))
-      )
-    `;
-  }
-
-  return categoryArticleFilterSql();
-}
-
-function approvedCategoryArticleFilterParams(category) {
-  if (normalizeSlug(category) === legacyCategoryFallbackSlug) {
-    return [legacyCategoryFallbackSlug, ...approvedCategoryDefinitions.map(([slug]) => slug)];
-  }
-
-  return [normalizeSlug(category)];
 }
 
 function graduationYearFilterSql() {
@@ -2159,30 +2314,26 @@ app.get("/api/categories", async (_req, res) => {
   try {
     const [rows] = await db.query(
       `
-      SELECT c.id, c.slug, c.name, COUNT(DISTINCT a.id) AS articleCount
+      SELECT
+        c.id,
+        c.slug,
+        c.name,
+        c.sort_order AS sortOrder,
+        c.visible_in_header AS visibleInHeader,
+        c.visible_on_homepage AS visibleOnHomepage,
+        c.parent_id AS parentId,
+        COUNT(DISTINCT a.id) AS articleCount,
+        COUNT(DISTINCT child.id) AS subcategoryCount
       FROM news_categories c
       LEFT JOIN news_article_categories ac ON ac.category_id = c.id
       LEFT JOIN news_articles a ON a.id = ac.article_id AND a.status = 'published' AND a.deleted_at IS NULL
-      GROUP BY c.id, c.slug, c.name
-      ORDER BY c.name ASC
+      LEFT JOIN news_categories child ON child.parent_id = c.id
+      GROUP BY c.id, c.slug, c.name, c.sort_order, c.visible_in_header, c.visible_on_homepage, c.parent_id
+      ORDER BY c.sort_order ASC, c.name ASC
       `
     );
 
-    const counts = new Map(approvedCategoryDefinitions.map(([slug]) => [slug, 0]));
-    rows.forEach((row) => {
-      const approvedCategory = approvedCategoryForSlug(row.slug);
-      counts.set(approvedCategory.slug, Number(counts.get(approvedCategory.slug) || 0) + Number(row.articleCount || 0));
-    });
-
-    res.json(approvedCategoryDefinitions.map(([slug, name], index) => {
-      const existing = rows.find((row) => row.slug === slug);
-      return {
-        id: existing?.id || index + 1,
-        slug,
-        name,
-        articleCount: counts.get(slug) || 0,
-      };
-    }));
+    res.json(rows.map(categoryResponse));
   } catch (error) {
     logRouteError("GET /api/categories", error);
     ensureMemoryFallbackReady();
@@ -2207,8 +2358,11 @@ app.post("/api/admin/categories", sensitiveRateLimiter, requireAdmin, async (req
     }
 
     const category = normalizeCategoryPayload(req.body);
-    const [result] = await db.query("INSERT INTO news_categories (slug, name) VALUES (?, ?)", [category.slug, category.name]);
-    res.status(201).json({ id: result.insertId, ...category, articleCount: 0 });
+    const [result] = await db.query(
+      "INSERT INTO news_categories (slug, name, sort_order, visible_in_header, visible_on_homepage, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
+      [category.slug, category.name, category.sortOrder, category.visibleInHeader ? 1 : 0, category.visibleOnHomepage ? 1 : 0, category.parentId]
+    );
+    res.status(201).json(categoryResponse({ id: result.insertId, ...category, articleCount: 0, subcategoryCount: 0 }));
   } catch (error) {
     logRouteError("POST /api/admin/categories", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY" || error?.statusCode === 409;
@@ -2227,13 +2381,83 @@ app.patch("/api/admin/categories/:slug", sensitiveRateLimiter, requireAdmin, asy
     }
 
     const category = normalizeCategoryPayload(req.body);
-    const [result] = await db.query("UPDATE news_categories SET slug = ?, name = ? WHERE slug = ?", [category.slug, category.name, req.params.slug]);
+    const [result] = await db.query(
+      "UPDATE news_categories SET slug = ?, name = ?, sort_order = ?, visible_in_header = ?, visible_on_homepage = ?, parent_id = ? WHERE slug = ?",
+      [category.slug, category.name, category.sortOrder, category.visibleInHeader ? 1 : 0, category.visibleOnHomepage ? 1 : 0, category.parentId, normalizeSlug(req.params.slug)]
+    );
     if (result.affectedRows === 0) return res.status(404).json({ message: "Category not found." });
-    res.json(category);
+    const [rows] = await db.query(
+      `
+      SELECT
+        c.id,
+        c.slug,
+        c.name,
+        c.sort_order AS sortOrder,
+        c.visible_in_header AS visibleInHeader,
+        c.visible_on_homepage AS visibleOnHomepage,
+        c.parent_id AS parentId,
+        COUNT(DISTINCT a.id) AS articleCount,
+        COUNT(DISTINCT child.id) AS subcategoryCount
+      FROM news_categories c
+      LEFT JOIN news_article_categories ac ON ac.category_id = c.id
+      LEFT JOIN news_articles a ON a.id = ac.article_id AND a.status = 'published' AND a.deleted_at IS NULL
+      LEFT JOIN news_categories child ON child.parent_id = c.id
+      WHERE c.slug = ?
+      GROUP BY c.id, c.slug, c.name, c.sort_order, c.visible_in_header, c.visible_on_homepage, c.parent_id
+      LIMIT 1
+      `,
+      [category.slug]
+    );
+    res.json(categoryResponse(rows[0] || category));
   } catch (error) {
     logRouteError("PATCH /api/admin/categories/:slug", error);
     const isDuplicate = error?.code === "ER_DUP_ENTRY" || error?.statusCode === 409;
     res.status(isDuplicate ? 409 : error.statusCode || 500).json({ message: isDuplicate ? "Category slug already exists." : error.message || "Could not update category." });
+  }
+});
+
+app.delete("/api/admin/categories/:slug", sensitiveRateLimiter, requireAdmin, async (req, res) => {
+  try {
+    assertEditorOrOwner(req.admin);
+    const slug = normalizeSlug(req.params.slug);
+
+    if (usingMemoryStore) {
+      const category = memoryCategories.find((item) => item.slug === slug);
+      if (!category) return res.status(404).json({ message: "Category not found." });
+      const articleCount = memoryArticles.filter((article) => {
+        const categorySlugs = article.category_slugs?.length
+          ? article.category_slugs
+          : [memoryCategories.find((item) => item.id === article.category_id)?.slug].filter(Boolean);
+        return categorySlugs.includes(slug);
+      }).length;
+      if (articleCount) {
+        return res.status(409).json({ message: "This category has articles. Move or edit those articles before deleting it." });
+      }
+      memoryCategories = memoryCategories.filter((item) => item.slug !== slug);
+      return res.status(204).end();
+    }
+
+    const [rows] = await db.query("SELECT id FROM news_categories WHERE slug = ? LIMIT 1", [slug]);
+    if (!rows.length) return res.status(404).json({ message: "Category not found." });
+    const categoryId = rows[0].id;
+    const [articleCountRows] = await db.query(
+      `
+      SELECT COUNT(DISTINCT a.id) AS count
+      FROM news_articles a
+      LEFT JOIN news_article_categories ac ON ac.article_id = a.id
+      WHERE a.category_id = ? OR ac.category_id = ?
+      `,
+      [categoryId, categoryId]
+    );
+    if (Number(articleCountRows[0]?.count || 0) > 0) {
+      return res.status(409).json({ message: "This category has articles. Move or edit those articles before deleting it." });
+    }
+
+    await db.query("DELETE FROM news_categories WHERE id = ?", [categoryId]);
+    res.status(204).end();
+  } catch (error) {
+    logRouteError("DELETE /api/admin/categories/:slug", error);
+    res.status(error.statusCode || 500).json({ message: error.message || "Could not delete category." });
   }
 });
 async function completeAdminLogin(req, res) {
@@ -2658,21 +2882,20 @@ app.get("/api/articles", async (req, res) => {
   const shouldPaginate = hasPaginationQuery(req.query);
 
   if (usingMemoryStore) {
-    const { q = "", category = "", year = "", contentType = "", author = "" } = req.query;
-    const articles = getMemoryArticles({ q, category, year, contentType, author, editorPick: isTruthy(req.query.editorPick) });
+    const { q = "", category = "", contentType = "", author = "" } = req.query;
+    const articles = getMemoryArticles({ q, category, contentType, author, editorPick: isTruthy(req.query.editorPick) });
     res.json(shouldPaginate ? paginatedMemoryResponse(articles, pagination) : articles);
     return;
   }
 
   try {
-    const { q = "", category = "", year = "", contentType = "", author = "" } = req.query;
-    const selectedYear = Number(year);
+    const { q = "", category = "", contentType = "", author = "" } = req.query;
     const where = ["a.status = 'published'", "a.deleted_at IS NULL", visibleArticleFilterSql()];
     const params = [];
 
     if (category && category !== "all") {
-      where.push(approvedCategoryArticleFilterSql(category));
-      params.push(...approvedCategoryArticleFilterParams(category));
+      where.push(categoryArticleFilterSql());
+      params.push(normalizeSlug(category));
     }
 
     if (contentType && contentType !== "all") {
@@ -2687,11 +2910,6 @@ app.get("/api/articles", async (req, res) => {
 
     if (isTruthy(req.query.editorPick)) {
       where.push("a.is_featured = 1");
-    }
-
-    if (graduationYearOptions.includes(selectedYear)) {
-      where.push(graduationYearFilterSql());
-      params.push(selectedYear);
     }
 
     if (q.trim()) {
@@ -2734,8 +2952,8 @@ app.get("/api/articles", async (req, res) => {
     logRouteError("GET /api/articles", error);
     ensureMemoryFallbackReady();
     if (!isProduction()) {
-      const { q = "", category = "", year = "", contentType = "", author = "" } = req.query;
-      const articles = getMemoryArticles({ q, category, year, contentType, author, editorPick: isTruthy(req.query.editorPick) });
+      const { q = "", category = "", contentType = "", author = "" } = req.query;
+      const articles = getMemoryArticles({ q, category, contentType, author, editorPick: isTruthy(req.query.editorPick) });
       res.json(shouldPaginate ? paginatedMemoryResponse(articles, pagination) : articles);
       return;
     }
@@ -2842,7 +3060,7 @@ app.post("/api/articles", sensitiveRateLimiter, requireAdmin, async (req, res) =
 
   try {
     const savedArticle = await withTransaction(async (connection) => {
-      const article = validateArticlePayload(req.body);
+      const article = validateArticlePayload(req.body, req.admin);
       assertCanCreateArticle(req.admin, article.status);
       const [categoryRows] = await connection.query("SELECT id FROM news_categories WHERE slug = ? LIMIT 1", [article.categorySlugs[0]]);
 
@@ -2929,7 +3147,7 @@ app.put("/api/articles/:slug", sensitiveRateLimiter, requireAdmin, async (req, r
 
   try {
     const savedArticle = await withTransaction(async (connection) => {
-      const article = validateArticlePayload(req.body);
+      const article = validateArticlePayload(req.body, req.admin);
       const [existingRows] = await connection.query("SELECT id, status, deleted_at, created_by_admin_id FROM news_articles WHERE slug = ? LIMIT 1 FOR UPDATE", [req.params.slug]);
 
       if (existingRows.length === 0) {
@@ -3099,10 +3317,11 @@ async function changeArticleStatus(req, res, requestedStatus) {
             deleted_at = IF(? = 'archived', NOW(), NULL),
             is_featured = IF(? = 'published', is_featured, 0),
             featured_order = IF(? = 'published', featured_order, NULL),
+            published_at = IF(? = 'published' AND published_at IS NULL, UTC_TIMESTAMP(), published_at),
             updated_by_admin_id = ?
         WHERE slug = ?
         `,
-        [status, status, status, status, adminIdValue(req.admin), req.params.slug]
+        [status, status, status, status, status, adminIdValue(req.admin), req.params.slug]
       );
 
       if (status !== "published" && existingRows[0].is_featured) {
